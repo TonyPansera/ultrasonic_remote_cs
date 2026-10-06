@@ -1,0 +1,80 @@
+{
+  "skill_name": "analyze-bars",
+  "evals": [
+    {
+      "id": 1,
+      "name": "single-192k-snr20",
+      "prompt": "/analyze-bars data/synthetic/synth_fs192k_snr20.wav",
+      "expected_output": "One report results/reports/<today>_synth_fs192k_snr20.md with the 7 template sections; verdict 38.0 kHz (within 0.2 %) with an uncertainty and Q ~ 500; the 76 kHz second mode reported; the 30 kHz line called an environment/noise line and the 15 kHz peak a low-Q (broadband) resonance; theory match longitudinal n=1 (sidecar L) mentioned; data/raw untouched; no ad-hoc DSP.",
+      "files": [],
+      "expectations": [
+        "report file results/reports/<today>_synth_fs192k_snr20.md exists",
+        "report has the 7 template sections in order",
+        "all embedded PNG links resolve",
+        "peaks table pasted from barlab table",
+        "verdict gives a ringing frequency within 0.2% of 38000 Hz",
+        "verdict gives an uncertainty (±)",
+        "report mentions the second mode near 76 kHz",
+        "interpretation calls the 30 kHz line environment/noise",
+        "interpretation calls the 15 kHz peak a low-Q/broadband resonance",
+        "data/raw unchanged",
+        "no ad-hoc DSP script created",
+        "index.csv has no duplicate rows"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "single-48k-aliased",
+      "prompt": "/analyze-bars data/synthetic/synth_fs48k_snr40.wav",
+      "expected_output": "Report for synth_fs48k_snr40 whose verdict says up front that the file cannot answer the question (fs = 48 kHz < 96 kHz, Nyquist 24 kHz, aliasing), CRITICAL before anything else, no peak presented as the ringing frequency, and a recommendation to record at >= 192 kHz.",
+      "files": [],
+      "expectations": [
+        "report file results/reports/<today>_synth_fs48k_snr40.md exists",
+        "report has the 7 template sections in order",
+        "verdict says not determinable",
+        "verdict explains the sample-rate problem (96 kHz / Nyquist / alias)",
+        "CRITICAL is stated before the Detected peaks section",
+        "verdict does not present an aliased peak as the ringing frequency",
+        "recommendations ask for a higher sample rate (>= 192 kHz)",
+        "data/raw unchanged",
+        "no ad-hoc DSP script created"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "batch-synthetic",
+      "prompt": "/analyze-bars data/synthetic/*.wav",
+      "expected_output": "Four per-file reports plus results/reports/<today>_batch-summary.md with a comparison table covering all four files: the three 192 kHz files agree on ~38.0 kHz (and 76 kHz), the 48 kHz file is marked not determinable.",
+      "files": [],
+      "expectations": [
+        "four per-file reports exist",
+        "every per-file report has the 7 template sections in order",
+        "batch summary exists",
+        "batch summary has a comparison table naming all four stems",
+        "batch summary marks the 48 kHz file not determinable",
+        "batch summary gives ~38 kHz for the 192 kHz files",
+        "48 kHz report verdict says not determinable",
+        "data/raw unchanged",
+        "no ad-hoc DSP script created",
+        "index.csv has no duplicate rows"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "pending-with-details",
+      "prompt": "I've just copied new recordings into data/raw/. Same setup for all of them: two aluminium bars, each 66.5 mm long and 16 mm in diameter, resting on foam at the middle (so free-free), struck against each other by hand. The room was at 21 °C and the mic was the PYG USB bat detector about 10 cm away. Please analyse whatever hasn't been analysed yet and tell me the ringing frequency.",
+      "expected_output": "Only the pending file data/raw/rec_b.wav is analysed (rec_a is already in the index and must not be re-analysed); data/meta/rec_b.toml is written with L = 66.5 mm, d = 16 mm, free-free and the stated conditions; the report gives 38.0 kHz and identifies it as longitudinal n=1 of the 66.5 mm bar (~ +0.4 %); data/raw untouched.",
+      "files": [],
+      "expectations": [
+        "only rec_b was analysed (rec_a result untouched)",
+        "data/meta/rec_b.toml has L = 66.5 mm and d = 16 mm",
+        "report file results/reports/<today>_rec_b.md exists",
+        "report has the 7 template sections in order",
+        "verdict gives a ringing frequency within 0.2% of 38000 Hz",
+        "report identifies the longitudinal n=1 mode",
+        "data/raw unchanged",
+        "no ad-hoc DSP script created"
+      ]
+    }
+  ]
+}

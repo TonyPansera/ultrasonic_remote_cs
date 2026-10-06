@@ -1,0 +1,23 @@
+# data/meta/<stem>.toml - details of ONE recording, as told by the user.
+# Write only what was stated; delete lines you don't know (unknown != guessed).
+# Lengths take units: "66.5mm", "6.65cm", or plain metres (0.0665).
+# Missing bar keys are inherited from data/meta/_defaults.toml (d = 16 mm, aluminium, free-free).
+
+[recording]
+mic = "PYG Bat_Detector_USB_384kHz"   # model, as given
+distance_m = 0.10                    # mic to bar
+temperature_c = 21.0
+striking = "bar A struck against bar B, hand-held"
+support = "bars resting on foam at the middle"
+notes = ""
+
+[[bar]]                 # one block per bar that can ring (two bars striking each other -> two blocks)
+name = "A"
+L = "66.5mm"
+d = "16mm"
+material = "aluminium"  # or give E (Pa), rho (kg/m3), nu explicitly
+bc = "free-free"        # "clamped-free" if the user says the bar is clamped
+
+# [[bar]]
+# name = "B"
+# L = "70.0mm"

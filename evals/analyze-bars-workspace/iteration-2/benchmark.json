@@ -1,0 +1,600 @@
+{
+  "metadata": {
+    "skill_name": "analyze-bars",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-10-06T14:55:21Z",
+    "evals_run": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 12,
+        "failed": 0,
+        "total": 12,
+        "time_seconds": 527.3,
+        "tokens": 138934,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "report file results/reports/<today>_synth_fs192k_snr20.md exists",
+          "passed": true,
+          "evidence": "results/reports/2026-10-06_synth_fs192k_snr20.md"
+        },
+        {
+          "text": "report has the 7 template sections in order",
+          "passed": true,
+          "evidence": "headings: ['verdict', 'recording quality', 'detected peaks', 'interpretation', 'comparison with previous recordings', 'recommendations for the next recording session', 'figures']"
+        },
+        {
+          "text": "all embedded PNG links resolve",
+          "passed": true,
+          "evidence": "5 image links, missing: []"
+        },
+        {
+          "text": "peaks table pasted from barlab table",
+          "passed": true,
+          "evidence": "barlab table header present"
+        },
+        {
+          "text": "verdict gives a ringing frequency within 0.2% of 38000 Hz",
+          "passed": true,
+          "evidence": "verdict: 'verdict\\n\\nRinging frequency: **38 000.5 \u00b1 0.63 Hz** (spread over 8 hits, outlier-cleaned; standard error\\n0.299 Hz), Q \u2248 504 (per-hit fits). It is the strongest bar-mode candidate: high Q, consistent\\nacross hits, 30.2 dB above the noise windo'"
+        },
+        {
+          "text": "verdict gives an uncertainty (\u00b1)",
+          "passed": true,
+          "evidence": "verdict\n\nRinging frequency: **38 000.5 \u00b1 0.63 Hz** (spread over 8 hits, outlier-cleaned; standard error\n0.299 Hz), Q \u2248 504 (per-hit fits). It is the strongest bar-mode candidate: high Q, consistent\nac"
+        },
+        {
+          "text": "report mentions the second mode near 76 kHz",
+          "passed": true,
+          "evidence": "~76 kHz mentioned"
+        },
+        {
+          "text": "interpretation calls the 30 kHz line environment/noise",
+          "passed": true,
+          "evidence": "- 30 000.1 Hz: 26.2 dB above the floor during ringdowns, but only 0.1 dB above the noise"
+        },
+        {
+          "text": "interpretation calls the 15 kHz peak a low-Q/broadband resonance",
+          "passed": true,
+          "evidence": "- **15 000.0 Hz is not the bar.** With Q 61 < 100 it decays into the noise within about 7 ms"
+        },
+        {
+          "text": "data/raw unchanged",
+          "passed": true,
+          "evidence": "before 0 files, after 0; equal=True"
+        },
+        {
+          "text": "no ad-hoc DSP script created",
+          "passed": true,
+          "evidence": "new script files: []"
+        },
+        {
+          "text": "index.csv has no duplicate rows",
+          "passed": true,
+          "evidence": "4 rows, 4 unique keys"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 9,
+        "failed": 0,
+        "total": 9,
+        "time_seconds": 422.1,
+        "tokens": 123316,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "report file results/reports/<today>_synth_fs48k_snr40.md exists",
+          "passed": true,
+          "evidence": "results/reports/2026-10-06_synth_fs48k_snr40.md"
+        },
+        {
+          "text": "report has the 7 template sections in order",
+          "passed": true,
+          "evidence": "headings: ['verdict', 'recording quality', 'detected peaks', 'interpretation', 'comparison with previous recordings', 'recommendations for the next recording session', 'figures']"
+        },
+        {
+          "text": "verdict says not determinable",
+          "passed": true,
+          "evidence": "verdict\n\n**Not determinable**: CRITICAL `FS_BELOW_96K`. The file is sampled at 48 000 Hz (Nyquist\n24 000 Hz), so content above 24 kHz either never made it into the file or folded back as aliases.\nAll 4 detected peaks are `possible_alias`, s"
+        },
+        {
+          "text": "verdict explains the sample-rate problem (96 kHz / Nyquist / alias)",
+          "passed": true,
+          "evidence": "verdict\n\n**Not determinable**: CRITICAL `FS_BELOW_96K`. The file is sampled at 48 000 Hz (Nyquist\n24 000 Hz), so content above 24 kHz either never made it into the file or folded back as aliases.\nAll 4 detected peaks are `possible_alias`, s"
+        },
+        {
+          "text": "CRITICAL is stated before the Detected peaks section",
+          "passed": true,
+          "evidence": "CRITICAL at 260, Detected peaks at 1878"
+        },
+        {
+          "text": "verdict does not present an aliased peak as the ringing frequency",
+          "passed": true,
+          "evidence": "no 'ringing frequency: <number>' in verdict"
+        },
+        {
+          "text": "recommendations ask for a higher sample rate (>= 192 kHz)",
+          "passed": true,
+          "evidence": "recommendations for the next recording session\n\n- **record at 192 khz (384 khz ideal).** this file shows why: at 48 khz the bar modes were out\n  of reach, and the cleanest-looking ringdown was a folde"
+        },
+        {
+          "text": "data/raw unchanged",
+          "passed": true,
+          "evidence": "before 0 files, after 0; equal=True"
+        },
+        {
+          "text": "no ad-hoc DSP script created",
+          "passed": true,
+          "evidence": "new script files: []"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 10,
+        "failed": 0,
+        "total": 10,
+        "time_seconds": 835.4,
+        "tokens": 213406,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "four per-file reports exist",
+          "passed": true,
+          "evidence": "present: ['synth_fs192k_snr40', 'synth_fs192k_snr20', 'synth_fs192k_snr10', 'synth_fs48k_snr40']"
+        },
+        {
+          "text": "every per-file report has the 7 template sections in order",
+          "passed": true,
+          "evidence": "failing: []"
+        },
+        {
+          "text": "batch summary exists",
+          "passed": true,
+          "evidence": "results/reports/2026-10-06_batch-summary.md"
+        },
+        {
+          "text": "batch summary has a comparison table naming all four stems",
+          "passed": true,
+          "evidence": "table rows 23, stems missing: []"
+        },
+        {
+          "text": "batch summary marks the 48 kHz file not determinable",
+          "passed": true,
+          "evidence": "found"
+        },
+        {
+          "text": "batch summary gives ~38 kHz for the 192 kHz files",
+          "passed": true,
+          "evidence": "~38 kHz present"
+        },
+        {
+          "text": "48 kHz report verdict says not determinable",
+          "passed": true,
+          "evidence": "verdict\n\n**Not determinable**: CRITICAL `FS_BELOW_96K`. The file is sampled at 48 000 Hz, so nothing above\nits 24 000 Hz Nyquist frequency can appear at its true frequency. Ultrasonic bar modes either"
+        },
+        {
+          "text": "data/raw unchanged",
+          "passed": true,
+          "evidence": "before 0 files, after 0; equal=True"
+        },
+        {
+          "text": "no ad-hoc DSP script created",
+          "passed": true,
+          "evidence": "new script files: []"
+        },
+        {
+          "text": "index.csv has no duplicate rows",
+          "passed": true,
+          "evidence": "16 rows, 16 unique keys"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 4,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 8,
+        "failed": 0,
+        "total": 8,
+        "time_seconds": 651.5,
+        "tokens": 148012,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "only rec_b was analysed (rec_a result untouched)",
+          "passed": true,
+          "evidence": "rec_a untouched=True, rec_b analysed=True"
+        },
+        {
+          "text": "data/meta/rec_b.toml has L = 66.5 mm and d = 16 mm",
+          "passed": true,
+          "evidence": "# data/meta/rec_b.toml - details of ONE recording, as told by the user (2026-10-06).\n# Only what was stated is written here; anything unknown is left out.\n\n[recording]\nmic = \"PYG USB bat detector\"\ndistance_m = 0.10\ntemperature_c = 21.0\nstriking = \"the two bars struck against each other by hand\"\nsupp"
+        },
+        {
+          "text": "report file results/reports/<today>_rec_b.md exists",
+          "passed": true,
+          "evidence": "results/reports/2026-10-06_rec_b.md"
+        },
+        {
+          "text": "report has the 7 template sections in order",
+          "passed": true,
+          "evidence": "headings: ['verdict', 'recording quality', 'detected peaks', 'interpretation', 'comparison with previous recordings', 'recommendations for the next recording session', 'figures']"
+        },
+        {
+          "text": "verdict gives a ringing frequency within 0.2% of 38000 Hz",
+          "passed": true,
+          "evidence": "verdict: 'verdict\\n\\nRinging frequency: **37 999.8 \u00b1 1.18 Hz** (spread over 8 hits; standard error 0.523 Hz), Q \u2248 503\\n(hits) - the strongest line: it starts at every impact, decays cleanly, agrees across all 8 hits\\nand matches the first longitudinal mo'"
+        },
+        {
+          "text": "report identifies the longitudinal n=1 mode",
+          "passed": true,
+          "evidence": "found"
+        },
+        {
+          "text": "data/raw unchanged",
+          "passed": true,
+          "evidence": "before 2 files, after 2; equal=True"
+        },
+        {
+          "text": "no ad-hoc DSP script created",
+          "passed": true,
+          "evidence": "new script files: []"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.583,
+        "passed": 7,
+        "failed": 5,
+        "total": 12,
+        "time_seconds": 310.6,
+        "tokens": 179164,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "report file results/reports/<today>_synth_fs192k_snr20.md exists",
+          "passed": true,
+          "evidence": "results/reports/2026-10-06_synth_fs192k_snr20.md"
+        },
+        {
+          "text": "report has the 7 template sections in order",
+          "passed": false,
+          "evidence": "missing 'recording quality'; headings: ['verdict: determinable. the bar rings at 38 000.4 hz (q \u2248 504), with a second mode at 76 001.9 hz (q \u2248 790)', 'recording and data quality: clean', 'peaks', 'uncertainty: read this before quoting error bars', 'theory comparison', 'ground-truth check (synthetic file)', 'comparison with earlier recordings', 'files']"
+        },
+        {
+          "text": "all embedded PNG links resolve",
+          "passed": false,
+          "evidence": "0 image links, missing: []"
+        },
+        {
+          "text": "peaks table pasted from barlab table",
+          "passed": false,
+          "evidence": "header missing"
+        },
+        {
+          "text": "verdict gives a ringing frequency within 0.2% of 38000 Hz",
+          "passed": true,
+          "evidence": "verdict: 'verdict: determinable. the bar rings at 38 000.4 hz (q \u2248 504), with a second mode at 76 001.9 hz (q \u2248 790)\\n\\n| mode | frequency (1\u03c3) | Q (\u00b1 SEM over hits) | \u03c4 (amplitude) | hits fitted |\\n|---|---|---|---|---|\\n| **primary** | **38 000.4 \u00b1 0.6'"
+        },
+        {
+          "text": "verdict gives an uncertainty (\u00b1)",
+          "passed": true,
+          "evidence": "verdict: determinable. the bar rings at 38 000.4 hz (q \u2248 504), with a second mode at 76 001.9 hz (q \u2248 790)\n\n| mode | frequency (1\u03c3) | Q (\u00b1 SEM over hits) | \u03c4 (amplitude) | hits fitted |\n|---|---|---|-"
+        },
+        {
+          "text": "report mentions the second mode near 76 kHz",
+          "passed": true,
+          "evidence": "~76 kHz mentioned"
+        },
+        {
+          "text": "interpretation calls the 30 kHz line environment/noise",
+          "passed": false,
+          "evidence": "no line with ~30000 Hz and any of ['environment', 'noise window', 'external', 'stationary', 'not the bar', 'not a bar', 'noise']"
+        },
+        {
+          "text": "interpretation calls the 15 kHz peak a low-Q/broadband resonance",
+          "passed": false,
+          "evidence": "no line with ~15000 Hz and any of ['broadband', 'low-q', 'low q', 'mount', 'low quality', 'q \u2248 6', 'q 6', 'resonance']"
+        },
+        {
+          "text": "data/raw unchanged",
+          "passed": true,
+          "evidence": "before 0 files, after 0; equal=True"
+        },
+        {
+          "text": "no ad-hoc DSP script created",
+          "passed": true,
+          "evidence": "new script files: []"
+        },
+        {
+          "text": "index.csv has no duplicate rows",
+          "passed": true,
+          "evidence": "4 rows, 4 unique keys"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.667,
+        "passed": 6,
+        "failed": 3,
+        "total": 9,
+        "time_seconds": 234.7,
+        "tokens": 167507,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "report file results/reports/<today>_synth_fs48k_snr40.md exists",
+          "passed": true,
+          "evidence": "results/reports/2026-10-06_synth_fs48k_snr40.md"
+        },
+        {
+          "text": "report has the 7 template sections in order",
+          "passed": false,
+          "evidence": "missing 'recording quality'; headings: ['verdict: not determinable', 'recording and segmentation (measured)', 'peaks found (all classed `possible_alias`)', 'which true frequencies could produce these peaks?', 'bar theory in the observable band', 'comparison with earlier recordings', \"check against the generator's ground truth (synthetic file only)\", 'what to do', 'files']"
+        },
+        {
+          "text": "verdict says not determinable",
+          "passed": true,
+          "evidence": "verdict: not determinable\n\n**This recording cannot give the bar's ringing frequency, its Q or their uncertainty.**\n\n- The sample rate is 48 kHz, so the Nyquist frequency is 24 kHz (barlab flags this as **CRITICAL `FS_BELOW_96K`**). Theory p"
+        },
+        {
+          "text": "verdict explains the sample-rate problem (96 kHz / Nyquist / alias)",
+          "passed": true,
+          "evidence": "verdict: not determinable\n\n**This recording cannot give the bar's ringing frequency, its Q or their uncertainty.**\n\n- The sample rate is 48 kHz, so the Nyquist frequency is 24 kHz (barlab flags this as **CRITICAL `FS_BELOW_96K`**). Theory p"
+        },
+        {
+          "text": "CRITICAL is stated before the Detected peaks section",
+          "passed": false,
+          "evidence": "CRITICAL at 418, Detected peaks at -1"
+        },
+        {
+          "text": "verdict does not present an aliased peak as the ringing frequency",
+          "passed": true,
+          "evidence": "no 'ringing frequency: <number>' in verdict"
+        },
+        {
+          "text": "recommendations ask for a higher sample rate (>= 192 kHz)",
+          "passed": false,
+          "evidence": ""
+        },
+        {
+          "text": "data/raw unchanged",
+          "passed": true,
+          "evidence": "before 0 files, after 0; equal=True"
+        },
+        {
+          "text": "no ad-hoc DSP script created",
+          "passed": true,
+          "evidence": "new script files: []"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.3,
+        "passed": 3,
+        "failed": 7,
+        "total": 10,
+        "time_seconds": 359.2,
+        "tokens": 194112,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "four per-file reports exist",
+          "passed": false,
+          "evidence": "present: []"
+        },
+        {
+          "text": "every per-file report has the 7 template sections in order",
+          "passed": false,
+          "evidence": "failing: ['synth_fs192k_snr40', 'synth_fs192k_snr20', 'synth_fs192k_snr10', 'synth_fs48k_snr40']"
+        },
+        {
+          "text": "batch summary exists",
+          "passed": false,
+          "evidence": "results/reports/2026-10-06_batch-summary.md"
+        },
+        {
+          "text": "batch summary has a comparison table naming all four stems",
+          "passed": false,
+          "evidence": "table rows 0, stems missing: ['synth_fs192k_snr40', 'synth_fs192k_snr20', 'synth_fs192k_snr10', 'synth_fs48k_snr40']"
+        },
+        {
+          "text": "batch summary marks the 48 kHz file not determinable",
+          "passed": false,
+          "evidence": "no line with synth_fs48k + not determinable"
+        },
+        {
+          "text": "batch summary gives ~38 kHz for the 192 kHz files",
+          "passed": false,
+          "evidence": "absent"
+        },
+        {
+          "text": "48 kHz report verdict says not determinable",
+          "passed": false,
+          "evidence": ""
+        },
+        {
+          "text": "data/raw unchanged",
+          "passed": true,
+          "evidence": "before 0 files, after 0; equal=True"
+        },
+        {
+          "text": "no ad-hoc DSP script created",
+          "passed": true,
+          "evidence": "new script files: []"
+        },
+        {
+          "text": "index.csv has no duplicate rows",
+          "passed": true,
+          "evidence": "16 rows, 16 unique keys"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 4,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.75,
+        "passed": 6,
+        "failed": 2,
+        "total": 8,
+        "time_seconds": 26.1,
+        "tokens": 190320,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "only rec_b was analysed (rec_a result untouched)",
+          "passed": true,
+          "evidence": "rec_a untouched=True, rec_b analysed=True"
+        },
+        {
+          "text": "data/meta/rec_b.toml has L = 66.5 mm and d = 16 mm",
+          "passed": true,
+          "evidence": "# rec_b: setup as described by the user on 2026-10-06 (\"same setup for all of them\").\n# Two nominally identical bars were struck against each other. They are described by ONE\n# [[bar]] entry: listing the same bar twice would duplicate every theoretical mode and make\n# every theory match \"ambiguous\" "
+        },
+        {
+          "text": "report file results/reports/<today>_rec_b.md exists",
+          "passed": true,
+          "evidence": "results/reports/2026-10-06_rec_b.md"
+        },
+        {
+          "text": "report has the 7 template sections in order",
+          "passed": false,
+          "evidence": "missing 'verdict'; headings: ['result', 'what was run', 'recording quality', 'all peaks', 'how precise is 38 000.4 hz?', 'theory check (66.5 mm \u00d7 16 mm aluminium, free-free)', 'why this is not a bat-detector recording', 'next steps']"
+        },
+        {
+          "text": "verdict gives a ringing frequency within 0.2% of 38000 Hz",
+          "passed": false,
+          "evidence": "verdict: ''"
+        },
+        {
+          "text": "report identifies the longitudinal n=1 mode",
+          "passed": true,
+          "evidence": "found"
+        },
+        {
+          "text": "data/raw unchanged",
+          "passed": true,
+          "evidence": "before 2 files, after 2; equal=True"
+        },
+        {
+          "text": "no ad-hoc DSP script created",
+          "passed": true,
+          "evidence": "new script files: []"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 609.075,
+        "stddev": 177.6417,
+        "min": 422.1,
+        "max": 835.4
+      },
+      "tokens": {
+        "mean": 155917.0,
+        "stddev": 39659.8943,
+        "min": 123316,
+        "max": 213406
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.575,
+        "stddev": 0.1956,
+        "min": 0.3,
+        "max": 0.75
+      },
+      "time_seconds": {
+        "mean": 232.65,
+        "stddev": 146.922,
+        "min": 26.1,
+        "max": 359.2
+      },
+      "tokens": {
+        "mean": 182775.75,
+        "stddev": 11994.5229,
+        "min": 167507,
+        "max": 194112
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.43",
+      "time_seconds": "+376.4",
+      "tokens": "-26859"
+    }
+  },
+  "notes": []
+}

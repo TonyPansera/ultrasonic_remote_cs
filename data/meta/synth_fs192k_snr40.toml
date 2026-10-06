@@ -1,0 +1,12 @@
+# Written by `barlab demo` for synth_fs192k_snr40; ground truth: data/synthetic/synth_fs192k_snr40.truth.json
+[recording]
+mic = "synthetic (ideal, flat)"
+striking = "synthetic: click + damped sinusoids"
+notes = "bar modes 38.0 kHz (Q 500) and 76.0 kHz (Q 800); 15 kHz Q 60 mount resonance; 30 kHz continuous line"
+
+[[bar]]
+name = "synthetic"
+L = "66.257mm"
+d = "16mm"
+material = "aluminium"
+bc = "free-free"

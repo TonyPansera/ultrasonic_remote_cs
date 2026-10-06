@@ -1,0 +1,79 @@
+{
+ "generator": "barlab.synth",
+ "fs_hz": 192000,
+ "snr_db": 20.0,
+ "seed": 2,
+ "duration_s": 3.373307,
+ "gain": 0.09339997429779301,
+ "noise_sigma_fs": 0.009339997429779302,
+ "hit_times_s": [
+  0.6,
+  0.887909,
+  1.218854,
+  1.475515,
+  1.806006,
+  2.113714,
+  2.381274,
+  2.673309
+ ],
+ "hit_amps": [
+  0.71,
+  0.863,
+  0.8249,
+  0.66,
+  0.7731,
+  0.8677,
+  0.7691,
+  0.8533
+ ],
+ "modes": [
+  {
+   "f_hz": 38000.0,
+   "q": 500.0,
+   "amp": 1.0,
+   "tau_ms": 4.1883,
+   "observed_f_hz": 38000.0
+  },
+  {
+   "f_hz": 76000.0,
+   "q": 800.0,
+   "amp": 0.4,
+   "tau_ms": 3.3506,
+   "observed_f_hz": 76000.0
+  }
+ ],
+ "lowq": [
+  {
+   "f_hz": 15000.0,
+   "q": 60.0,
+   "amp": 3.0,
+   "tau_ms": 1.2732,
+   "observed_f_hz": 15000.0
+  }
+ ],
+ "env_tones": [
+  {
+   "f_hz": 30000.0,
+   "amp_sigma": 1.0,
+   "observed_f_hz": 30000.0
+  }
+ ],
+ "click": {
+  "amp": 3.0,
+  "sigma_us": 10.0
+ },
+ "expected": {
+  "bar_mode_candidate": [
+   38000.0,
+   76000.0
+  ],
+  "noise_or_environment": [
+   30000.0
+  ],
+  "broadband_resonance": [
+   15000.0
+  ],
+  "possible_alias": []
+ },
+ "bar_L_m": 0.06625741234976884
+}

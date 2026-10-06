@@ -1,0 +1,11 @@
+# Project-wide defaults for every recording. A per-recording sidecar
+# data/meta/<stem>.toml overrides these (its [[bar]] entries inherit any key they omit);
+# barlab analyze --L/--d/--bc/... overrides both. Never put guesses here: leave a value
+# out when it is unknown (an unknown L makes barlab report implied lengths instead).
+
+[[bar]]
+name = "bar"
+d = "16mm"              # known: solid cylinder, 16 mm diameter
+material = "aluminium"  # alloy unknown: E = 69 GPa, rho = 2700 kg/m3, nu = 0.33 (c ~ 5055 m/s)
+bc = "free-free"        # assumption until the support is known (nodal supports ~ free-free)
+# L = "..."             # unknown - measure the bars and add it (per recording if they differ)

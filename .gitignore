@@ -1,0 +1,41 @@
+# Python / uv
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
+
+# Claude Code: personal settings stay local (.claude/settings.json and skills are shared)
+.claude/settings.local.json
+CLAUDE.local.md
+
+# Raw recordings stay out of git: they grow with every session, and their GUANO metadata
+# holds GPS coordinates (barlab never copies those into results). Back them up separately,
+# or use `git add -f` / Git LFS if you do want them versioned.
+data/raw/
+
+# Lock and temp files from barlab's atomic index writes
+results/index.csv.lock
+results/.index.*.csv
+
+# Skill-eval workspace: keep each iteration's benchmark and static viewer only; the per-run
+# sandboxes are full project copies (hundreds of MB) and can be rebuilt with setup_sandboxes.py.
+evals/analyze-bars-workspace/*/*
+!evals/analyze-bars-workspace/*/benchmark.json
+!evals/analyze-bars-workspace/*/benchmark.md
+!evals/analyze-bars-workspace/*/review.html
