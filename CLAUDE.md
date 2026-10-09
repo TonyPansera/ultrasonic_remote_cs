@@ -140,6 +140,16 @@ Cross-cutting:
 - Keep measured values (frequency, Q, spreads) apart from inferences (class, mode family,
   theory match).
 
+## esp32/ (ESP32 firmware)
+
+- `esp32/` holds the PlatformIO projects for the LilyGO T-Display. It has its own `CLAUDE.md`
+  (toolchain, board quirks, USB/serial) and `README.md`. It was merged from `~/esp32` with its
+  history on 2026-10-09; `~/esp32` is an old backup, so don't edit it.
+- Build with `pio run` inside a project folder. Upload, open `/dev/ttyACM0` or run anything on the
+  board only when the user says the board is attached.
+- barlab's Python rules (no DSP outside `barlab/`) don't cover firmware. Firmware DSP gets a
+  host-side unit test instead (`pio test -e native`).
+
 ## Analysing recordings
 
 Use `/analyze-bars [files or glob]`.

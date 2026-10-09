@@ -4,6 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
+This folder is part of the barlab repo (`~/signal_analysis`; merged from `~/esp32` on 2026-10-09). The root `CLAUDE.md` covers the Python analysis side.
+
 Workspace for ESP32 projects targeting a **LilyGO T-Display v1.1** (ESP32-D0WDQ6-V3, 4MB flash, no PSRAM, ST7789 135x240 TFT), built and flashed from WSL2 with PlatformIO. Each subfolder is a standalone PlatformIO project. `tdisplay_test/` is the working reference: copy its `platformio.ini` when starting a new project. See `README.md` for the user-facing guide.
 
 ## Toolchain versions (matter for API choice)
@@ -14,7 +16,7 @@ Workspace for ESP32 projects targeting a **LilyGO T-Display v1.1** (ESP32-D0WDQ6
 
 ## Commands
 
-Run from inside a project folder (e.g. `~/esp32/tdisplay_test`):
+Run from inside a project folder (e.g. `~/signal_analysis/esp32/tdisplay_test`):
 
 ```bash
 pio run                      # build
@@ -80,4 +82,4 @@ TFT_eSPI is configured **entirely through `build_flags`** in `platformio.ini`: `
 | Button right | 35 | input-only, no internal pull-up (external one on board), LOW = pressed |
 | Supply voltage ADC | 34 | ×2 divider; set GPIO14 (ADC_EN) HIGH first |
 
-GPIOs 34–39 are input-only. Keep project folders on the WSL ext4 filesystem (`~/esp32`), not `/mnt/c`, because builds there are much slower.
+GPIOs 34–39 are input-only. Keep project folders on the WSL ext4 filesystem (`~/signal_analysis/esp32`), not `/mnt/c`, because builds there are much slower.

@@ -67,7 +67,7 @@ A pin stuck at a rail appears as a flat line on the red "ADC max"/"ADC min" line
 ## Usage
 
 ```bash
-cd ~/esp32/ultrasonic_probe
+cd ~/signal_analysis/esp32/ultrasonic_probe
 pio run -t upload                      # flash the firmware (board attached as /dev/ttyACM0)
 uv run tools/analyze_signal.py         # ~3 min: measure, plot, write results/
 uv run tools/analyze_signal.py --trend 5 --captures 1   # quicker run

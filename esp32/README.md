@@ -7,7 +7,7 @@ This folder holds ESP32 projects for the **LilyGO T-Display v1.1**. They are bui
 | [`tdisplay_test/`](tdisplay_test) | Hardware test (screen, buttons, chip info) and template for new projects |
 | [`ultrasonic_probe/`](ultrasonic_probe) | Samples GPIO32 at ~249 kS/s and checks the ultrasonic remote's 38 / 42 kHz FSK signal (live on screen); host script makes graphs and a report ([latest report](ultrasonic_probe/results/REPORT.md)) |
 
-Windows path to this folder (for VS Code or Explorer): `\\wsl.localhost\Ubuntu-26.04\home\tonyp\esp32`
+Windows path to this folder (for VS Code or Explorer): `\\wsl.localhost\Ubuntu-26.04\home\tonyp\signal_analysis\esp32`
 
 ---
 
@@ -109,7 +109,7 @@ ls -l /dev/ttyACM0       # crw-rw-rw- ... /dev/ttyACM0
 Run everything from **inside a project folder**:
 
 ```bash
-cd ~/esp32/tdisplay_test
+cd ~/signal_analysis/esp32/tdisplay_test
 ```
 
 | Action | Command |
@@ -134,7 +134,7 @@ Notes:
 The simplest way is to copy the test project, which already contains the working display configuration:
 
 ```bash
-cd ~/esp32
+cd ~/signal_analysis/esp32
 cp -r tdisplay_test my_project
 rm -rf my_project/.pio          # don't copy old build files
 cd my_project
@@ -153,7 +153,7 @@ my_project/
 └── .pio/              # generated: build output + downloaded libraries (never edit)
 ```
 
-Keep projects in `~/esp32` (Linux filesystem). Building from `/mnt/c/...` works too but is much slower.
+Keep projects in `~/signal_analysis/esp32` (Linux filesystem). Building from `/mnt/c/...` works too but is much slower.
 
 ### Adding a library
 

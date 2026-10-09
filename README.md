@@ -15,6 +15,9 @@ The repository has two layers:
   checks the numbers against the plots and writes one report per recording, keeping measurements
   apart from interpretation.
 
+Next to them, **`esp32/`** holds the PlatformIO firmware for a LilyGO T-Display (ESP32) that
+listens to the same ultrasound live. See [`esp32/README.md`](esp32/README.md).
+
 ## Contents
 
 - [Quick start](#quick-start)
@@ -313,6 +316,7 @@ docs/result_schema.md          every field of result.json
 .claude/skills/analyze-bars/   the skill: SKILL.md, report template, physics notes, evals
 .claude/settings.json          denies Claude Code write access to data/raw/
 evals/                         benchmarks and viewers of the skill evaluations
+esp32/                         T-Display PlatformIO projects (own README.md and CLAUDE.md)
 CLAUDE.md                      instructions for Claude Code working in this repo
 ```
 
