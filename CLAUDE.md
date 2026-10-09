@@ -53,13 +53,15 @@ The device is already bound (persisted), so `bind` (admin) is not needed again. 
 
 ## ultrasonic_probe (GPIO32 signal analysis)
 
-- The firmware speaks a line protocol at 921600 baud (`info`, `rate`, `cap`, `pull`, `src`, `disp`); see `ultrasonic_probe/README.md`. `tools/analyze_signal.py` is the host side: `cd ultrasonic_probe && uv run tools/analyze_signal.py` takes about 3 min and regenerates `results/` (figures, `REPORT.md`, `summary.json`, `data/*.npz`).
+- The firmware speaks a line protocol at 921600 baud (`info`, `rate`, `cap`, `pull`, `src`, `disp`, `view`, `shot`); see `ultrasonic_probe/README.md`. `tools/analyze_signal.py` is the host side: `cd ultrasonic_probe && uv run tools/analyze_signal.py` takes about 3 min and regenerates `results/` (figures, `REPORT.md`, `summary.json`, `data/*.npz`).
+- I can't see the panel: `shot` dumps the scope sprite (240x87 RGB565 hex) so it can be rendered to a PNG to check UI changes. Rows sometimes arrive corrupted over USB/IP, so validate the row length and hex, then retry.
 - **Opening `/dev/ttyACM0` resets the board** (cdc_acm toggles DTR/RTS even with `dtr=False`). Host code must wait for the `READY` line before sending commands, or the first command is lost during boot.
 - ESP32 I2S built-in-ADC quirks, all verified on this board:
   - each 16-bit sample pair comes out swapped (un-swap with `i ^ 1`);
   - the true conversion rate is fixed at ~249 kS/s, and a higher I2S rate only repeats each conversion (x2/x4/x8);
   - `i2s_set_adc_mode()`/`i2s_adc_enable()` re-init the pad and clear RTC pulls, so re-apply pulls after them.
-- The legacy PCNT driver enables a pull-up on its input pin, which precharges a floating node. Measure with `analogRead()` before configuring PCNT.
+- The legacy PCNT driver enables a pull-up on its input pin, which precharges a floating node, so measure with `analogRead()` before configuring PCNT. But `analogRead()` leaves the pad on the RTC/analog mux, which disconnects PCNT's digital input: call `rtc_gpio_deinit()` + `pinMode(INPUT)` before PCNT, or it silently counts 0.
+- The signal is an FSK remote: 38 kHz and 42 kHz tones (each ±500 Hz accepted), sent as 50 bursts/s (~19 ms on / ~1 ms off) with silences between transmissions (the line idles at ~2.18 V with ~50-70 mVpp noise). Count a tone as signal only at ≥ 10 mV (`signal_present`); weaker lines are interference.
 - A ~0.3 mV line wandering around 41 kHz (plus an 83 kHz harmonic) appears even on an unconnected ADC pin, with the display asleep. It is supply/ground interference: never report a tone that weak as a signal.
 
 ## Display configuration (non-obvious)

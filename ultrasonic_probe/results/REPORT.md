@@ -1,53 +1,66 @@
 # GPIO32 ultrasonic signal check
 
-- **Date:** 2026-10-02T16:31:03
+- **Date:** 2026-10-02T17:02:35
 - **Board:** LilyGO T-Display v1.1 (ESP32-D0WDQ6-V3), firmware `ultrasonic_probe`
 - **Input:** GPIO32 = ADC1 channel 4, 12 dB attenuation (range ~142-3145 mV, eFuse-calibrated)
 - **Sampler:** I2S built-in ADC DMA, configured 250 kHz, true conversion rate **249.0 kS/s** (6.2 samples per 40 kHz period)
 
-## Verdict: FAIL - no usable 40 kHz signal on GPIO32
+## Verdict: PASS with warnings - both FSK tones present
 
-- As wired, 100.0% of samples sit at the ADC limit (codes 4095-4095, full scale = 3145 mV). The input is at or above the measurable range, so no AC component can be seen.
-- As wired, peak-to-peak amplitude is 0.0 mV (< 20 mV).
-- As wired, no tone stands out in the 35-45 kHz search band.
 
-### Supporting evidence
+- **Warning:** 30% of samples sit at an ADC limit (24% at the top (3145 mV), 5% at the bottom (142 mV)); inside the bursts the signal is beyond the measurable range 36% of the time, so its peaks are flattened. Frequencies are unaffected, but the true peak levels are unknown and could leave the 0-3.3 V the pin tolerates.
 
-- Hardware edge counter (PCNT, digital input) counted **0 edges in 1 s** at boot: the pin never crossed the logic threshold.
-- Independent `analogRead()` check at boot: mean code 4095 (~3145 mV), range 4095-4095.
-- With the internal ~45 kOhm pull-down the pin only drops by ~210 mV to 2935 mV: GPIO32 is **actively driven high**, not floating.
-- If that node is tied to 3.3 V, its source resistance is roughly 5.6 kOhm (rough estimate: the internal pull value varies +-50 %). That is the signature of a pull-up resistor (4.7 kOhm is a standard value) with nothing pulling the line down.
-- With the pull-down (signal brought into range) a tone **is** visible at 41557 Hz, 1.26 mV amplitude, SNR 23.3 dB.
-- The ~41 kHz line also appears on GPIO33, where nothing is connected (0.28 mV at 41.47 kHz, SNR 22.2 dB), even with the display asleep: at least part of it is coupled through the shared supply/ground (board or external circuit), not carried by the GPIO32 signal.
-- On GPIO32 that line averages 1.05 mV, 3.7x the unconnected pin (0.28 mV): part of it probably arrives through the GPIO32 wire, i.e. a ~41 kHz source may be running upstream. Even so, it is about a millivolt on a line pinned at the top of the range, not a usable receiver signal.
-- With the display asleep, GPIO32 (internal pull-down) still shows 35-45 kHz component (best peak 0.85 mV at 41.18 kHz, SNR 19.1 dB).
+### Findings
 
-## What to check on the hardware
+- **38 kHz tone found at 38003.7 Hz** (error +4 Hz, spread +-1.6 Hz over 8 captures), amplitude ~1233 mV, SNR 55 dB.
+- **42 kHz tone found at 41993.5 Hz** (error -6 Hz, spread +-0.5 Hz over 28 captures), amplitude ~1111 mV, SNR 53 dB.
+- 38 kHz is sent in bursts of ~19.0 ms separated by ~1.0 ms (one burst every ~20.0 ms, 50 bursts/s). Inside a burst the signal swings 142-3145 mV around 1793 mV.
+- 42 kHz is sent in bursts of ~18.5 ms separated by ~1.5 ms (one burst every ~20.0 ms, 50 bursts/s). Inside a burst the signal swings 142-3145 mV around 2289 mV.
+- Tone over the 26 s trend (one short capture every ~0.7 s): 38 kHz (0.6 s) -> silence (1.3 s) -> 42 kHz (1.9-3.2 s) -> silence (3.9 s) -> 42 kHz (4.5-5.8 s) -> silence (6.5 s) -> 42 kHz (7.1-10.4 s) -> silence (11.0 s) -> 38 kHz (11.7-13.0 s) -> silence (13.6 s) -> 42 kHz (14.3-15.6 s) -> silence (16.2 s) -> 38 kHz (16.9-18.2 s) -> silence (18.8 s) -> 42 kHz (19.5-20.8 s) -> silence (21.4 s) -> 42 kHz (22.1-26.0 s).
+- With no tone (silence between transmissions) GPIO32 rests at ~2178 mV.
+- Independent check: the PCNT hardware counter (digital input) saw up to 39.1k edges/s in one 250 ms gate at boot (gates: 0, 4261, 9772, 9704). That matches a 38-42 kHz tone that is on ~94% of the time inside the burst train; gates near 0 fell in silences.
+- GPIO33 (nothing connected, next to GPIO32) picks up 19.1 mV at 41.99 kHz, 38 dB below GPIO32: crosstalk, not a second signal.
 
-1. **Measure GPIO32 with a multimeter** while the ultrasonic circuit runs. A properly biased analog receiver output idles near mid-supply (~1.65 V on 3.3 V). About 3.3 V means the output is stuck at the rail. **Above 3.6 V means the module runs from 5 V: disconnect it**, because it can damage the ESP32 (power it from 3.3 V, or add a resistor divider).
-2. **Check what GPIO32 is wired to.** The measurement looks like a ~4.7 kOhm pull-up to 3.3 V with nothing driving the line. That fits a wire landing on the module's VCC/pull-up pin instead of the amplifier output, or an open-collector comparator output (e.g. LM393) that never switches.
-3. **If the module outputs a comparator/echo signal** (idle high, pulled low only when an echo is detected), it never toggled here: 0 edges counted in 1 s. Check that the transmitter fires and that something reflects back to the receiver.
-4. **If it is meant to be an analog amplifier output,** check its bias: the amplifier needs a mid-supply reference (VCC/2 divider) and the transducer must be AC-coupled through a capacitor. A missing or shorted coupling capacitor, a wrong bias or too much gain drives the output to the positive rail.
-5. **Check the 40 kHz source on its own** with an oscilloscope at the transmitter and at the receiver output, before the ESP32. The faint ~41 kHz line seen here also shows up on an unconnected pin, so it cannot confirm the transmitter is running.
+## Detected tones
+
+Expected: 38 kHz and 42 kHz, +-500 Hz. Each row groups every as-wired capture (long and trend) whose dominant 35-45 kHz component falls in that tone.
+
+| Tone | Measured (Hz) | Error (Hz) | Spread (Hz) | Captures | Amplitude (mV) | SNR (dB) | |
+|---|---|---|---|---|---|---|---|
+| 38 kHz | 38003.7 | +3.7 | +-1.6 | 8 | 1233 | 55 | OK |
+| 42 kHz | 41993.5 | -6.5 | +-0.5 | 28 | 1111 | 53 | OK |
+
+### Burst pattern (one long capture per tone)
+
+| Tone | Burst on (ms) | Gap (ms) | Period (ms) | Bursts/s | Burst center (mV) | Burst swing (mV) | Gap time above ADC range |
+|---|---|---|---|---|---|---|---|
+| 38 kHz | 19.0 | 1.0 | 20.0 | 50 | 1793 | 142-3145 | 61 % |
+| 42 kHz | 18.5 | 1.5 | 20.0 | 50 | 2289 | 142-3145 | 74 % |
+
+## Keeping the signal inside the ADC range
+
+The ESP32 reads about 0.14-3.15 V on this pin (12 dB attenuation). Anything above reads 4095, anything below reads 0.
+1. **Check the true peaks with an oscilloscope** at the receiver output. The pin must stay within 0-3.3 V: it is not 5 V tolerant and must not go negative. If the peaks leave that range, add a resistor divider (and/or a series resistor so the ESP32's clamp diodes limit the current).
+2. **Keep the swing under ~2.5 Vpp.** If the bursts clip at both ends, the signal is simply too big: lower the receiver gain or attenuate with a divider. The frequency survives clipping, but amplitude-based decoding does not.
+3. **Center the signal at mid-rail by AC-coupling it:** put a 100 nF capacitor in series, then on the GPIO32 side 100 kOhm to 3.3 V and 100 kOhm to GND. The signal then sits around 1.65 V whatever the receiver's own DC level. The high-pass corner is ~30 Hz, so 38/42 kHz pass untouched.
 
 ## Measurements
 
 | Capture | DC (mV) | Vpp (mV) | AC RMS (mV) | Clipped | Code range | 35-45 kHz peak (freq / amplitude / SNR) |
 |---|---|---|---|---|---|---|
-| as wired (no pull) #0 | 3145 | 0.0 | 0.00 | 100.0 % | 4095-4095 | n/a (flat line) |
-| as wired (no pull) #1 | 3145 | 0.0 | 0.00 | 100.0 % | 4095-4095 | n/a (flat line) |
-| internal pull-down #0 | 2964 | 75.1 | 9.87 | 0.0 % | 3573-3815 | 41.56 kHz / 1.26 mV / 23.3 dB |
-| internal pull-down #1 | 2978 | 78.5 | 9.72 | 0.0 % | 3600-3852 | 41.06 kHz / 1.02 mV / 21.4 dB |
+| as wired (no pull) #0 | 2127 | 3003.0 | 1028.78 | 35.7 % | 0-4095 | 41.99 kHz / 1229.93 mV / 66.1 dB |
+| as wired (no pull) #1 | 2191 | 3003.0 | 696.23 | 19.0 % | 0-4095 | 41.99 kHz / 383.72 mV / 49.6 dB |
+| as wired (no pull) #2 | 2182 | 3003.0 | 801.26 | 24.0 % | 0-4095 | 41.99 kHz / 777.03 mV / 57.4 dB |
 
-Pass criteria (as wired): clipped < 0.1 %, Vpp >= 20 mV, a tone >= 15 dB above the local noise floor inside 38-42 kHz.
+Pass criteria (as wired): each expected tone (38 kHz / 42 kHz) found within +-500 Hz, at least 15 dB above the local noise floor. Warning if more than 0.1 % of samples sit at the ADC limit.
 
 ### Connection test
 
 | Pull | DC (mV) | Vpp (mV) | Clipped |
 |---|---|---|---|
-| as wired (no pull) | 3145 | 0.0 | 100.0 % |
-| internal pull-down | 2935 | 78.0 | 0.0 % |
-| internal pull-up | 3145 | 0.0 | 100.0 % |
+| as wired (no pull) | 2090 | 3003.0 | 33.8 % |
+| internal pull-down | 2176 | 35.2 | 0.0 % |
+| internal pull-up | 2082 | 2690.8 | 29.8 % |
 
 ### Interference controls
 
@@ -55,10 +68,10 @@ GPIO33 has nothing connected; with both internal pulls it sits at mid-rail throu
 
 | Capture | Pin | Pull | Display | DC (mV) | Vpp (mV) | 35-45 kHz peak (freq / amplitude / SNR) |
 |---|---|---|---|---|---|---|
-| gpio33_floating | GPIO33 | none | on | 142 | 0.0 | n/a (flat line) |
-| gpio33_display_on | GPIO33 | both | on | 1454 | 14.9 | 41.47 kHz / 0.28 mV / 22.2 dB |
-| gpio33_display_off | GPIO33 | both | asleep | 1455 | 19.0 | 40.98 kHz / 0.29 mV / 21.5 dB |
-| gpio32_display_off | GPIO32 | down | asleep | 2981 | 90.2 | 41.18 kHz / 0.85 mV / 19.1 dB |
+| gpio33_floating | GPIO33 | none | on | 302 | 407.4 | 41.99 kHz / 193.36 mV / 66.4 dB |
+| gpio33_display_on | GPIO33 | both | on | 1454 | 52.6 | 41.99 kHz / 19.11 mV / 58.1 dB |
+| gpio33_display_off | GPIO33 | both | asleep | 1454 | 52.6 | 41.99 kHz / 19.41 mV / 58.5 dB |
+| gpio32_display_off | GPIO32 | none | asleep | 1751 | 3003.0 | 38.00 kHz / 1469.42 mV / 69.0 dB |
 
 ### Sampler sweep
 
@@ -68,15 +81,16 @@ The ESP32 I2S-ADC path repeats each conversion several times in the DMA stream. 
 |---|---|---|---|
 | 250 | 249.0 | 1 | 249.0 |
 | 500 | 498.1 | 2 | 249.0 |
-| 1000 | 996.2 | 4 | 249.0 |
-| 2000 | 1992.5 | 8 | 249.1 |
+| 1000 | 996.1 | 4 | 249.0 |
+| 2000 | 1992.4 | 8 | 249.0 |
 
-Boot info: `PCNT counts per 250 ms gate = 0,0,0,0`, `analogRead mean = 4095.0`, `ADC cal = efuse_vref (Vref 1114 mV)`.
+Boot info: `PCNT counts per 250 ms gate = 0,4261,9772,9704`, `analogRead mean = 2171.4`, `ADC cal = efuse_vref (Vref 1114 mV)`.
 
 ## Graphs
 
 ![Connection test](01_connection_test.png)
 ![Waveform](02_waveform.png)
+![Tones over time and burst pattern](09_fsk.png)
 ![Spectrum](03_spectrum.png)
 ![Spectrogram](04_spectrogram.png)
 ![Histogram](05_histogram.png)

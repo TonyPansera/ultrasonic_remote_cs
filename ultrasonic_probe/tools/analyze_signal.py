@@ -3,7 +3,11 @@
 # requires-python = ">=3.11"
 # dependencies = ["numpy>=2", "scipy>=1.13", "matplotlib>=3.9", "pyserial>=3.5"]
 # ///
-"""Capture and analyze the ~40 kHz ultrasonic signal on GPIO32 of the LilyGO T-Display.
+"""Capture and analyze the ultrasonic remote signal on GPIO32 of the LilyGO T-Display.
+
+The remote sends two tones, 38 kHz and 42 kHz (FSK), as bursts. The script checks that both tones
+are there (within +-500 Hz), measures their exact frequency, when each one plays and the burst timing,
+and whether the signal stays inside the ADC range.
 
 Talks to the ultrasonic_probe firmware over serial and runs, in order:
   1. a connection test: GPIO32 with no pull / internal pull-down / internal pull-up
@@ -39,15 +43,19 @@ CHANNEL = 4  # ADC1 channel of GPIO32
 CONTROL_CHANNEL = 5  # ADC1 channel of GPIO33
 FULL_SCALE_CODE = 4095
 TARGET_HZ = 40_000.0
-BAND_HZ = (38_000.0, 42_000.0)  # accepted ultrasonic band (typical 40 kHz transducers: +-1 kHz)
+EXPECTED_TONES_HZ = (38_000.0, 42_000.0)  # FSK pair sent by the ultrasonic remote
+TONE_TOLERANCE_HZ = 500.0
+BAND_HZ = (EXPECTED_TONES_HZ[0] - TONE_TOLERANCE_HZ, EXPECTED_TONES_HZ[-1] + TONE_TOLERANCE_HZ)
+TONE_COLORS = {38_000.0: "tab:blue", 42_000.0: "tab:red"}
 SEARCH_HZ = (35_000.0, 45_000.0)  # where the tone is looked for
 MIN_VPP_MV = 20.0
 MAX_CLIP_FRACTION = 0.001
 MIN_TONE_SNR_DB = 15.0
+MIN_SIGNAL_MV = 10.0  # a real remote tone is hundreds of mV; weaker lines are interference (~1 mV)
 PULL_RESISTOR_OHM = 45_000  # ESP32 datasheet typical internal pull resistor
 ASSUMED_RAIL_MV = 3300.0
 SWEEP_RATES = [250_000, 500_000, 1_000_000, 2_000_000]
-DEFAULT_RATE = 1_000_000
+DEFAULT_RATE = 250_000  # firmware default: one DMA sample per ADC conversion
 LONG_CAPTURE = 40960
 SHORT_CAPTURE = 8192
 
@@ -210,6 +218,93 @@ def tone_present(m: dict) -> bool:
     return m["tone_snr_db"] is not None and m["tone_snr_db"] >= MIN_TONE_SNR_DB
 
 
+def signal_present(m: dict) -> bool:
+    """A tone strong enough to be the remote's signal, not just a line above a quiet noise floor."""
+    return tone_present(m) and m["tone_mv"] >= MIN_SIGNAL_MV
+
+
+def nearest_expected(hz: float) -> float:
+    return min(EXPECTED_TONES_HZ, key=lambda e: abs(e - hz))
+
+
+def tone_label(m: dict) -> str:
+    """'38 kHz' / '42 kHz' for an expected tone, the frequency for anything else, 'silence' otherwise."""
+    if not signal_present(m):
+        return "silence"
+    e = nearest_expected(m["tone_hz"])
+    return f"{e / 1e3:.0f} kHz" if abs(m["tone_hz"] - e) <= TONE_TOLERANCE_HZ else f"{m['tone_hz'] / 1e3:.1f} kHz?"
+
+
+def burst_pattern(mv: np.ndarray, codes: np.ndarray, fs: float, win_s: float = 1e-3, hop_s: float = 0.5e-3) -> dict:
+    """Dominant 30-50 kHz component per 1 ms window: separates bursts (tone on) from gaps (tone off)."""
+    win, hop, nfft = int(fs * win_s), int(fs * hop_s), 8192
+    w = np.hanning(win)
+    ff = np.fft.rfftfreq(nfft, 1 / fs)
+    band = np.flatnonzero((ff >= 30e3) & (ff <= 50e3))
+    starts = np.arange(0, len(mv) - win, hop)
+    freq, amp, sat = [], [], []
+    for i in starts:
+        seg = mv[i : i + win]
+        spec = np.abs(np.fft.rfft((seg - seg.mean()) * w, nfft)) * 2 / w.sum()
+        k = band[np.argmax(spec[band])]
+        freq.append(ff[k])
+        amp.append(spec[k])
+        sat.append(np.mean((codes[i : i + win] >= FULL_SCALE_CODE) | (codes[i : i + win] <= 0)))
+    freq, amp, sat = np.array(freq), np.array(amp), np.array(sat)
+    # A burst window carries at least half the typical burst amplitude (gaps can be short dips, not silence).
+    active = amp >= max(0.5 * np.percentile(amp, 90), 5.0)
+    mask = np.zeros(len(mv), dtype=bool)
+    for i in starts[active]:
+        mask[i : i + win] = True
+    bounds = np.r_[0, np.flatnonzero(np.diff(active.astype(int))) + 1, len(active)]
+    runs = [(bool(active[a]), (b - a) * hop_s * 1e3) for a, b in zip(bounds[:-1], bounds[1:])]
+    inner = runs[1:-1]  # the first and last runs are cut by the capture edges
+    return {"t_ms": (starts + win / 2) / fs * 1e3, "freq": freq, "amp": amp, "sat": sat, "active": active,
+            "mask": mask, "on_ms": [d for a, d in inner if a], "off_ms": [d for a, d in inner if not a]}
+
+
+def wired_long(run) -> list[dict]:
+    """All long as-wired captures: the main ones plus the display-off control when it is as wired."""
+    caps = list(run["captures"]["none"])
+    c = run["controls"]["gpio32_display_off"]
+    if c["pull"] == "none":
+        caps.append(c)
+    return caps
+
+
+def tone_clusters(entries: list[dict]) -> list[dict]:
+    """Group the per-capture tones (closer than 1 kHz) and compare each group with the expected tones."""
+    detected = sorted((e for e in entries if signal_present(e)), key=lambda e: e["tone_hz"])
+    groups = []
+    for e in detected:
+        if groups and e["tone_hz"] - groups[-1][-1]["tone_hz"] < 1_000:
+            groups[-1].append(e)
+        else:
+            groups.append([e])
+    clusters = []
+    for g in groups:
+        hz = np.array([e["tone_hz"] for e in g])
+        expected = nearest_expected(hz.mean())
+        clusters.append({"hz": float(hz.mean()), "std_hz": float(hz.std()), "n": len(g),
+                         "amp_mv": float(np.median([e["tone_mv"] for e in g])),
+                         "snr_db": float(np.median([e["tone_snr_db"] for e in g])),
+                         "expected_hz": expected, "error_hz": float(hz.mean() - expected),
+                         "ok": bool(abs(hz.mean() - expected) <= TONE_TOLERANCE_HZ)})
+    return clusters
+
+
+def timeline(trend: list[dict]) -> list[list]:
+    """Merge consecutive trend captures with the same tone into [label, start s, end s] segments."""
+    segments = []
+    for p in trend:
+        label = tone_label(p)
+        if segments and segments[-1][0] == label:
+            segments[-1][2] = p["t"]
+        else:
+            segments.append([label, p["t"], p["t"]])
+    return segments
+
+
 # ---------------------------------------------------------------- measurement plan
 
 
@@ -258,7 +353,7 @@ def measure(probe: Probe, trend_runs: int, long_captures: int) -> dict:
         top = max(s["rate_true"] for s in usable)
         best = min((s for s in usable if s["rate_true"] >= 0.99 * top), key=lambda s: s["repeat"])
     main_rate = best["rate_cfg"] if best else DEFAULT_RATE
-    k = best["repeat"] if best else 4  # 4 = value observed at the 1 MHz default
+    k = best["repeat"] if best else 1  # DEFAULT_RATE gives one DMA sample per conversion
     run["main_rate_cfg"], run["repeat"] = main_rate, k
 
     print(f"[3/5] long captures at cfg {main_rate} Hz (true ~{main_rate / k / 1e3:.0f} kS/s)")
@@ -349,31 +444,51 @@ def plot_connection(run, out: Path):
     plt.close(fig)
 
 
+def signal_traces(run) -> list[tuple[dict, str, str]]:
+    """(capture, color, name) to plot: one per detected tone as wired, else the first capture of each mode."""
+    traces = []
+    for mode in run["modes"]:
+        if mode == "none" and run.get("reps"):
+            for e, c in sorted(run["reps"].items()):
+                traces.append((c, TONE_COLORS.get(e, COLORS[mode]), f"{LABELS[mode]}, {e / 1e3:.0f} kHz tone"))
+        else:
+            traces.append((run["captures"][mode][0], COLORS[mode], LABELS[mode]))
+    return traces
+
+
 def plot_waveforms(run, out: Path):
     fs = run["fs_true"]
-    modes = run["modes"]
-    fig, axes = plt.subplots(len(modes), 2, figsize=(13, 3.6 * len(modes)), squeeze=False)
-    for row, mode in enumerate(modes):
-        c = run["captures"][mode][0]
+    full_scale = run["cal"]["mv"][-1]
+    traces = signal_traces(run)
+    fig, axes = plt.subplots(len(traces), 2, figsize=(13, 3.6 * len(traces)), squeeze=False)
+    for row, (c, color, name) in enumerate(traces):
         t_ms = np.arange(len(c["mv"])) / fs * 1e3
+        # Zoom 500 us well inside a burst (after it has settled), or at the start if there is no burst.
+        bp = burst_pattern(c["mv"], c["codes"], fs)
+        steady = [i for i in range(len(bp["active"]) - 6) if bp["active"][i : i + 6].all()]
+        t0 = bp["t_ms"][steady[0]] + 1.0 if steady else 0.0
+        zoom = (t_ms >= t0) & (t_ms < t0 + 0.5)
         ax = axes[row, 0]
-        zoom = t_ms < 0.5
-        ax.plot(t_ms[zoom] * 1e3, c["mv"][zoom], ".-", color=COLORS[mode], lw=0.8, ms=3)
+        ax.plot((t_ms[zoom] - t0) * 1e3, c["mv"][zoom], ".-", color=color, lw=0.8, ms=3)
         for t in np.arange(0, 500, 1e6 / TARGET_HZ):
             ax.axvline(t, color="grey", lw=0.5, alpha=0.4)
-        ax.set_xlabel("time (us) - grey lines every 25 us = one 40 kHz period")
+        ax.set_xlabel(f"time (us) from t = {t0:.1f} ms - grey lines every 25 us")
         ax.set_ylabel("mV")
-        ax.set_title(f"{LABELS[mode]}: first 500 us")
+        ax.set_title(f"{name}: 500 us {'inside a burst' if steady else 'from the start'}")
+        if zoom.any():
+            lo, hi = c["mv"][zoom].min(), c["mv"][zoom].max()
+            pad = max(hi - lo, 40) * 0.15
+            ax.set_ylim(lo - pad, max(hi, full_scale) + pad if hi >= full_scale - 1 else hi + pad)
         style_axes(ax)
         ax = axes[row, 1]
-        ax.plot(t_ms, c["mv"], color=COLORS[mode], lw=0.4)
+        ax.plot(t_ms, c["mv"], color=color, lw=0.4)
         ax.set_xlabel("time (ms)")
-        ax.set_title(f"{LABELS[mode]}: full capture ({t_ms[-1]:.0f} ms)")
+        ax.set_title(f"{name}: full capture ({t_ms[-1]:.0f} ms)")
+        span = max(c["mv"].max() - c["mv"].min(), 40) * 0.1
+        ax.set_ylim(c["mv"].min() - span, max(c["mv"].max(), full_scale) + span)
         style_axes(ax)
         for a in axes[row]:
-            a.axhline(run["cal"]["mv"][-1], color="k", ls="--", lw=0.8)
-            span = max(c["vpp_mv"], 40)
-            a.set_ylim(c["dc_mv"] - span, min(c["dc_mv"] + span, run["cal"]["mv"][-1] + span * 0.3))
+            a.axhline(full_scale, color="k", ls="--", lw=0.8)
     fig.suptitle(f"GPIO32 waveform, true sample rate {fs / 1e3:.0f} kS/s (dashed = ADC full scale)")
     fig.tight_layout()
     fig.savefig(out / "02_waveform.png", dpi=120)
@@ -383,18 +498,17 @@ def plot_waveforms(run, out: Path):
 def plot_spectrum(run, out: Path):
     fs = run["fs_true"]
     fig, axes = plt.subplots(1, 2, figsize=(13, 4.5))
-    for mode in run["modes"]:
-        c = run["captures"][mode][0]
+    for c, color, name in signal_traces(run):
         if np.ptp(c["codes"]) == 0:
-            axes[0].plot([], [], color=COLORS[mode], label=f"{LABELS[mode]}: flat line (no AC at all)")
+            axes[0].plot([], [], color=color, label=f"{name}: flat line (no AC at all)")
             continue
         f, spec = amplitude_spectrum(c["mv"], fs)
         db = 20 * np.log10(spec + 1e-6)
-        label = f"{LABELS[mode]}: 35-45 kHz peak {c['tone_mv']:.2f} mV @ {c['tone_hz'] / 1e3:.2f} kHz, SNR {c['tone_snr_db']:.1f} dB"
+        label = f"{name}: peak {c['tone_mv']:.2f} mV @ {c['tone_hz'] / 1e3:.3f} kHz, SNR {c['tone_snr_db']:.1f} dB"
         for ax in axes:
-            ax.plot(f / 1e3, db, color=COLORS[mode], lw=0.5, label=label)
+            ax.plot(f / 1e3, db, color=color, lw=0.5, alpha=0.85, label=label)
         floor_db = 20 * np.log10(c["floor_mv"])
-        axes[1].axhline(floor_db + MIN_TONE_SNR_DB, color=COLORS[mode], ls="--", lw=1,
+        axes[1].axhline(floor_db + MIN_TONE_SNR_DB, color=color, ls="--", lw=1,
                         label=f"detection threshold (floor + {MIN_TONE_SNR_DB:.0f} dB)")
     ctl = run["controls"]["gpio33_display_on"]
     if np.ptp(ctl["codes"]) > 0:
@@ -404,7 +518,9 @@ def plot_spectrum(run, out: Path):
         for ax in axes:
             ax.plot(f / 1e3, 20 * np.log10(spec + 1e-6), color=CONTROL_COLOR, lw=0.5, alpha=0.8, label=label)
     for ax in axes:
-        ax.axvspan(BAND_HZ[0] / 1e3, BAND_HZ[1] / 1e3, color="green", alpha=0.12, label="expected band 38-42 kHz")
+        for e in EXPECTED_TONES_HZ:
+            ax.axvspan((e - TONE_TOLERANCE_HZ) / 1e3, (e + TONE_TOLERANCE_HZ) / 1e3, color="green", alpha=0.15,
+                       label=f"expected tones 38 / 42 kHz +-{TONE_TOLERANCE_HZ:.0f} Hz")
         ax.set_xlabel("frequency (kHz)")
         ax.set_ylabel("amplitude (dB re 1 mV)")
         style_axes(ax)
@@ -416,10 +532,10 @@ def plot_spectrum(run, out: Path):
     uniq = dict(zip(labels, handles))
     axes[1].legend(uniq.values(), uniq.keys(), fontsize=7, loc="lower left", framealpha=0.9)
     h0, l0 = axes[0].get_legend_handles_labels()
-    keep = [i for i, l in enumerate(l0) if not l.startswith("expected band")]
+    keep = [i for i, l in enumerate(l0) if not l.startswith("expected tones")]
     axes[0].legend([h0[i] for i in keep], [l0[i] for i in keep], fontsize=7, loc="lower left", framealpha=0.9)
     for ax in axes:
-        ax.set_ylim(-90, 15)
+        ax.set_ylim(-90, 75)
     fig.tight_layout()
     fig.savefig(out / "03_spectrum.png", dpi=120)
     plt.close(fig)
@@ -537,41 +653,184 @@ def plot_interference(run, out: Path):
                     label=f"{state}: 35-45 kHz peak SNR {snr}")
         ax.axvspan(BAND_HZ[0] / 1e3, BAND_HZ[1] / 1e3, color="green", alpha=0.12)
         ax.set_xlim(20, 100)
-        ax.set_ylim(-90, 15)
+        ax.set_ylim(-90, 60)
         ax.set_xlabel("frequency (kHz)")
         ax.set_title(title)
         ax.legend(fontsize=8, loc="lower left", framealpha=0.9)
         style_axes(ax)
     axes[0].set_ylabel("amplitude (dB re 1 mV)")
-    fig.suptitle("Where does the ~41 kHz line come from? (green band = expected 38-42 kHz)")
+    fig.suptitle("Interference controls: GPIO32 vs unconnected GPIO33, display on / asleep (green = expected band)")
     fig.tight_layout()
     fig.savefig(out / "08_interference.png", dpi=120)
+    plt.close(fig)
+
+
+def plot_fsk(run, out: Path):
+    trend = run["trend"]["none"]
+    fig, axes = plt.subplots(2, 1, figsize=(12, 7.5))
+    ax = axes[0]
+    for e in EXPECTED_TONES_HZ:
+        ax.axhspan((e - TONE_TOLERANCE_HZ) / 1e3, (e + TONE_TOLERANCE_HZ) / 1e3, color=TONE_COLORS[e], alpha=0.1)
+        ax.axhline(e / 1e3, color=TONE_COLORS[e], ls="--", lw=0.8)
+    for p in trend:
+        if signal_present(p):
+            color = TONE_COLORS.get(nearest_expected(p["tone_hz"]), "k")
+            ax.plot(p["t"], p["tone_hz"] / 1e3, "o", color=color, ms=6)
+        else:
+            ax.plot(p["t"], TARGET_HZ / 1e3, "x", color="0.4", ms=7)
+    handles = [plt.Line2D([], [], marker="o", ls="", color=TONE_COLORS[e], label=f"{e / 1e3:.0f} kHz tone")
+               for e in EXPECTED_TONES_HZ]
+    handles.append(plt.Line2D([], [], marker="x", ls="", color="0.4", label="no tone (silence)"))
+    ax.legend(handles=handles, fontsize=8, loc="upper right", framealpha=0.9)
+    ax.set_ylim(36.5, 43.5)
+    ax.set_xlabel("time (s)")
+    ax.set_ylabel("tone frequency (kHz)")
+    ax.set_title(f"Which tone is sent over time (one {SHORT_CAPTURE / run['fs_true'] * 1e3:.0f} ms capture per point, "
+                 f"bands = +-{TONE_TOLERANCE_HZ:.0f} Hz)")
+    style_axes(ax)
+
+    ax = axes[1]
+    for e, b in sorted(run.get("bursts", {}).items()):
+        bp = b["pattern"]
+        ax.plot(bp["t_ms"], bp["amp"], color=TONE_COLORS.get(e, "k"), lw=1,
+                label=f"{e / 1e3:.0f} kHz: bursts ~{b['on_ms']:.1f} ms on / ~{b['off_ms']:.1f} ms off "
+                      f"({b['bursts_per_s']:.0f} bursts/s)")
+    ax.set_xlabel("time in capture (ms)")
+    ax.set_ylabel("tone amplitude (mV, 1 ms windows)")
+    ax.set_title("Burst pattern inside one long capture per tone")
+    if run.get("bursts"):
+        ax.legend(fontsize=8, loc="upper right", framealpha=0.9)
+    style_axes(ax)
+    fig.tight_layout()
+    fig.savefig(out / "09_fsk.png", dpi=120)
     plt.close(fig)
 
 
 # ---------------------------------------------------------------- verdict + report
 
 
-def verdict(run) -> tuple[bool, list[str], list[str]]:
+def assess(run) -> dict:
+    """Verdict for the FSK remote signal as wired, plus warnings and findings for the report."""
     info = run["info"]
     full_scale = run["cal"]["mv"][-1]
-    nat = run["captures"]["none"][0]
-    failures, notes = [], []
+    fs = run["fs_true"]
+    trend = run["trend"]["none"]
+    wired = wired_long(run)
+    entries = wired + trend
+    clusters = tone_clusters(entries)
+    failures, warnings, notes = [], [], []
 
-    if nat["valid"] < 0.99:
-        failures.append(f"Only {nat['valid'] * 100:.1f}% of the DMA words come from ADC1 channel 4: sampler problem.")
-    if nat["clip_fraction"] > MAX_CLIP_FRACTION:
-        failures.append(
-            f"As wired, {nat['clip_fraction'] * 100:.1f}% of samples sit at the ADC limit "
-            f"(codes {nat['code_min']}-{nat['code_max']}, full scale = {full_scale:.0f} mV). "
-            "The input is at or above the measurable range, so no AC component can be seen.")
-    if nat["vpp_mv"] < MIN_VPP_MV:
-        failures.append(f"As wired, peak-to-peak amplitude is {nat['vpp_mv']:.1f} mV (< {MIN_VPP_MV:.0f} mV).")
-    if not tone_present(nat):
-        failures.append("As wired, no tone stands out in the 35-45 kHz search band.")
-    elif not BAND_HZ[0] <= nat["tone_hz"] <= BAND_HZ[1]:
-        failures.append(f"Tone found at {nat['tone_hz']:.0f} Hz, outside the 38-42 kHz band.")
+    if min(c["valid"] for c in wired) < 0.99:
+        failures.append("Some DMA words do not come from ADC1 channel 4: sampler problem.")
+    if not clusters:
+        nat = wired[0]
+        failures.append(f"As wired, no tone stands out in 35-45 kHz in any of the {len(entries)} captures.")
+        if nat["clip_fraction"] > 0.5:
+            failures.append(f"As wired, {nat['clip_fraction'] * 100:.0f}% of samples sit at the ADC limit "
+                            f"(full scale = {full_scale:.0f} mV): the input is at or beyond the measurable range.")
+        elif nat["vpp_mv"] < MIN_VPP_MV:
+            failures.append(f"As wired, peak-to-peak amplitude is only {nat['vpp_mv']:.1f} mV.")
+    span_s = trend[-1]["t"] if trend else 0
+    for e in EXPECTED_TONES_HZ:
+        if clusters and not any(c["ok"] and c["expected_hz"] == e for c in clusters):
+            failures.append(f"Expected tone {e / 1e3:.0f} kHz not found (+-{TONE_TOLERANCE_HZ:.0f} Hz) in "
+                            f"{len(entries)} captures over {span_s:.0f} s.")
+    for c in [c for c in clusters if not c["ok"] and c["n"] == 1]:
+        notes.append(f"1 capture had its strongest 35-45 kHz component at {c['hz']:.0f} Hz (SNR {c['snr_db']:.0f} dB), "
+                     "outside both tone bands. It is not counted as a tone.")
+    clusters = [c for c in clusters if c["ok"] or c["n"] > 1]
+    for c in clusters:
+        if c["ok"]:
+            notes.append(f"**{c['expected_hz'] / 1e3:.0f} kHz tone found at {c['hz']:.1f} Hz** "
+                         f"(error {c['error_hz']:+.0f} Hz, spread +-{c['std_hz']:.1f} Hz over {c['n']} captures), "
+                         f"amplitude ~{c['amp_mv']:.0f} mV, SNR {c['snr_db']:.0f} dB.")
+        else:
+            warnings.append(f"Unexpected tone at {c['hz']:.0f} Hz ({c['n']} captures), "
+                            f"{c['error_hz']:+.0f} Hz from {c['expected_hz'] / 1e3:.0f} kHz.")
 
+    # Representative long capture per tone, burst timing and levels
+    reps = {}
+    for c in wired:
+        if signal_present(c) and abs(c["tone_hz"] - nearest_expected(c["tone_hz"])) <= TONE_TOLERANCE_HZ:
+            e = nearest_expected(c["tone_hz"])
+            if e not in reps or c["tone_snr_db"] > reps[e]["tone_snr_db"]:
+                reps[e] = c
+    run["reps"] = reps
+    bursts = {}
+    for e, c in sorted(reps.items()):
+        bp = burst_pattern(c["mv"], c["codes"], fs)
+        on = float(np.median(bp["on_ms"])) if bp["on_ms"] else float("nan")
+        off = float(np.median(bp["off_ms"])) if bp["off_ms"] else float("nan")
+        inside = c["mv"][bp["mask"]]
+        bursts[e] = {"pattern": bp, "on_ms": on, "off_ms": off, "period_ms": on + off,
+                     "bursts_per_s": 1000 / (on + off) if on + off > 0 else float("nan"),
+                     "burst_center_mv": float(np.median(inside)) if len(inside) else float("nan"),
+                     "burst_min_mv": float(np.percentile(inside, 0.5)) if len(inside) else float("nan"),
+                     "burst_max_mv": float(np.percentile(inside, 99.5)) if len(inside) else float("nan"),
+                     "sat_in_bursts": float(bp["sat"][bp["active"]].mean()) if bp["active"].any() else 0.0,
+                     "sat_in_gaps": float(bp["sat"][~bp["active"]].mean()) if (~bp["active"]).any() else 0.0}
+        b = bursts[e]
+        if bp["on_ms"]:
+            notes.append(f"{e / 1e3:.0f} kHz is sent in bursts of ~{on:.1f} ms separated by ~{off:.1f} ms "
+                         f"(one burst every ~{on + off:.1f} ms, {b['bursts_per_s']:.0f} bursts/s). Inside a burst the "
+                         f"signal swings {b['burst_min_mv']:.0f}-{b['burst_max_mv']:.0f} mV around {b['burst_center_mv']:.0f} mV.")
+    run["bursts"] = bursts
+
+    segments = timeline(trend)
+    run["timeline"] = segments
+    if clusters and trend:
+        seq = " -> ".join(f"{lab} ({a:.1f}-{b:.1f} s)" if b > a else f"{lab} ({a:.1f} s)" for lab, a, b in segments)
+        notes.append(f"Tone over the {span_s:.0f} s trend (one short capture every ~{span_s / max(len(trend) - 1, 1):.1f} s): {seq}.")
+    idle = [p["dc_mv"] for p in trend if not signal_present(p) and p["clip_fraction"] < 0.01]
+    if clusters and idle:
+        notes.append(f"With no tone (silence between transmissions) GPIO32 rests at ~{np.median(idle):.0f} mV.")
+
+    clip = float(np.mean([c["clip_fraction"] for c in wired]))
+    clip_hi = float(np.mean([np.mean(c["codes"] >= FULL_SCALE_CODE) for c in wired]))
+    clip_lo = float(np.mean([np.mean(c["codes"] <= 0) for c in wired]))
+    if clusters and clip > MAX_CLIP_FRACTION:
+        zero = run["cal"]["mv"][0]
+        where = [f"{clip_hi * 100:.0f}% at the top ({full_scale:.0f} mV)"]
+        if clip_lo > MAX_CLIP_FRACTION:
+            where.append(f"{clip_lo * 100:.0f}% at the bottom ({zero:.0f} mV)")
+        inb = np.mean([b["sat_in_bursts"] for b in bursts.values()]) if bursts else float("nan")
+        warnings.append(
+            f"{clip * 100:.0f}% of samples sit at an ADC limit ({', '.join(where)}); inside the bursts the signal is "
+            f"beyond the measurable range {inb * 100:.0f}% of the time, so its peaks are flattened. Frequencies are "
+            "unaffected, but the true peak levels are unknown and could leave the 0-3.3 V the pin tolerates.")
+        run["range_warning"] = True
+        run["clip_both_rails"] = clip_lo > MAX_CLIP_FRACTION
+
+    if clusters:
+        counts = [int(x) for x in info["pcnt_counts"].split(",")]
+        gate_s = float(info["pcnt_gate_ms"]) / 1000
+        if max(counts) == 0:
+            notes.append("The PCNT edge counter saw 0 edges at boot: the signal never crossed the ESP32's digital "
+                         "input thresholds during that second (or it was a silence). The frequencies above come from the "
+                         "ADC captures.")
+        else:
+            duty = np.nanmean([b["on_ms"] / b["period_ms"] for b in bursts.values()]) if bursts else float("nan")
+            notes.append(f"Independent check: the PCNT hardware counter (digital input) saw up to "
+                         f"{max(counts) / gate_s / 1e3:.1f}k edges/s in one {gate_s * 1e3:.0f} ms gate at boot "
+                         f"(gates: {', '.join(map(str, counts))}). That matches a 38-42 kHz tone that is on "
+                         f"~{duty * 100:.0f}% of the time inside the burst train; gates near 0 fell in silences.")
+        ctl = run["controls"]["gpio33_display_on"]
+        sig = max(reps.values(), key=lambda c: c["tone_mv"]) if reps else None
+        if sig is not None and tone_present(ctl):
+            notes.append(f"GPIO33 (nothing connected, next to GPIO32) picks up {ctl['tone_mv']:.1f} mV at "
+                         f"{ctl['tone_hz'] / 1e3:.2f} kHz, {20 * np.log10(sig['tone_mv'] / ctl['tone_mv']):.0f} dB "
+                         "below GPIO32: crosstalk, not a second signal.")
+    else:
+        diagnose_no_signal(run, notes)
+
+    status = "FAIL" if failures else "PASS with warnings" if warnings else "PASS"
+    return {"status": status, "failures": failures, "warnings": warnings, "notes": notes,
+            "tones": clusters, "clip_fraction": clip}
+
+
+def diagnose_no_signal(run, notes: list[str]):
+    """Connection-test and interference findings, useful when nothing is detected as wired."""
+    info = run["info"]
     pcnt_hz = float(info["pcnt_hz"])
     if pcnt_hz == 0:
         notes.append("Hardware edge counter (PCNT, digital input) counted **0 edges in 1 s** at boot: "
@@ -644,7 +903,6 @@ def verdict(run) -> tuple[bool, list[str], list[str]]:
         notes.append(f"With the display asleep, GPIO32 ({LABELS[sig_off['pull']]}) {state} 35-45 kHz component "
                      f"(best peak {sig_off['tone_mv']:.2f} mV at {sig_off['tone_hz'] / 1e3:.2f} kHz, "
                      f"SNR {sig_off['tone_snr_db']:.1f} dB).")
-    return not failures, failures, notes
 
 
 HARDWARE_CHECKS = """## What to check on the hardware
@@ -658,8 +916,18 @@ HARDWARE_CHECKS = """## What to check on the hardware
 """
 
 
-def write_report(run, out: Path, timestamp: str):
-    ok, failures, notes = verdict(run)
+RANGE_ADVICE = """## Keeping the signal inside the ADC range
+
+The ESP32 reads about 0.14-3.15 V on this pin (12 dB attenuation). Anything above reads 4095, anything below reads 0.
+1. **Check the true peaks with an oscilloscope** at the receiver output. The pin must stay within 0-3.3 V: it is not 5 V tolerant and must not go negative. If the peaks leave that range, add a resistor divider (and/or a series resistor so the ESP32's clamp diodes limit the current).
+2. **Keep the swing under ~2.5 Vpp.** If the bursts clip at both ends, the signal is simply too big: lower the receiver gain or attenuate with a divider. The frequency survives clipping, but amplitude-based decoding does not.
+3. **Center the signal at mid-rail by AC-coupling it:** put a 100 nF capacitor in series, then on the GPIO32 side 100 kOhm to 3.3 V and 100 kOhm to GND. The signal then sits around 1.65 V whatever the receiver's own DC level. The high-pass corner is ~30 Hz, so 38/42 kHz pass untouched.
+
+"""
+
+
+def write_report(run, out: Path, timestamp: str, result: dict):
+    failures, warnings, notes = result["failures"], result["warnings"], result["notes"]
     info = run["info"]
     rows = []
     for mode in run["modes"]:
@@ -671,8 +939,32 @@ def write_report(run, out: Path, timestamp: str):
     sweep_rows = "\n".join(
         f"| {s['rate_cfg'] / 1e3:.0f} | {s['rate_io'] / 1e3:.1f} | {s['repeat'] or 'n/a'} | "
         f"{(s['rate_true'] / 1e3) if s['rate_true'] else float('nan'):.1f} |" for s in run["sweep"])
-    status = "PASS - 40 kHz signal present and measurable" if ok else "FAIL - no usable 40 kHz signal on GPIO32"
+    status = {"PASS": "PASS - both FSK tones present and measurable",
+              "PASS with warnings": "PASS with warnings - both FSK tones present",
+              "FAIL": "FAIL"}[result["status"]]
     nl = "\n"
+    tone_rows = nl.join(
+        f"| {c['expected_hz'] / 1e3:.0f} kHz | {c['hz']:.1f} | {c['error_hz']:+.1f} | +-{c['std_hz']:.1f} | {c['n']} | "
+        f"{c['amp_mv']:.0f} | {c['snr_db']:.0f} | {'OK' if c['ok'] else 'OUT'} |" for c in result["tones"])
+    burst_rows = nl.join(
+        f"| {e / 1e3:.0f} kHz | {b['on_ms']:.1f} | {b['off_ms']:.1f} | {b['period_ms']:.1f} | {b['bursts_per_s']:.0f} | "
+        f"{b['burst_center_mv']:.0f} | {b['burst_min_mv']:.0f}-{b['burst_max_mv']:.0f} | {b['sat_in_gaps'] * 100:.0f} % |"
+        for e, b in sorted(run.get("bursts", {}).items()))
+    tone_section = f"""## Detected tones
+
+Expected: {' and '.join(f'{e / 1e3:.0f} kHz' for e in EXPECTED_TONES_HZ)}, +-{TONE_TOLERANCE_HZ:.0f} Hz. Each row groups every as-wired capture (long and trend) whose dominant 35-45 kHz component falls in that tone.
+
+| Tone | Measured (Hz) | Error (Hz) | Spread (Hz) | Captures | Amplitude (mV) | SNR (dB) | |
+|---|---|---|---|---|---|---|---|
+{tone_rows}
+
+### Burst pattern (one long capture per tone)
+
+| Tone | Burst on (ms) | Gap (ms) | Period (ms) | Bursts/s | Burst center (mV) | Burst swing (mV) | Gap time above ADC range |
+|---|---|---|---|---|---|---|---|
+{burst_rows}
+
+""" if result["tones"] else ""
     report = f"""# GPIO32 ultrasonic signal check
 
 - **Date:** {timestamp}
@@ -682,19 +974,20 @@ def write_report(run, out: Path, timestamp: str):
 
 ## Verdict: {status}
 
-{nl.join(f'- {f}' for f in failures) if failures else '- All checks passed.'}
+{nl.join(f'- **Failure:** {f}' for f in failures)}
+{nl.join(f'- **Warning:** {w}' for w in warnings)}
 
-### Supporting evidence
+### Findings
 
 {nl.join(f'- {n}' for n in notes)}
 
-{HARDWARE_CHECKS if run.get("stuck_high_via_resistor") and not ok else ""}## Measurements
+{tone_section}{HARDWARE_CHECKS if run.get("stuck_high_via_resistor") and not result["tones"] else ""}{RANGE_ADVICE if run.get("range_warning") else ""}## Measurements
 
 | Capture | DC (mV) | Vpp (mV) | AC RMS (mV) | Clipped | Code range | 35-45 kHz peak (freq / amplitude / SNR) |
 |---|---|---|---|---|---|---|
 {nl.join(rows)}
 
-Pass criteria (as wired): clipped < {MAX_CLIP_FRACTION * 100:.1f} %, Vpp >= {MIN_VPP_MV:.0f} mV, a tone >= {MIN_TONE_SNR_DB:.0f} dB above the local noise floor inside {BAND_HZ[0] / 1e3:.0f}-{BAND_HZ[1] / 1e3:.0f} kHz.
+Pass criteria (as wired): each expected tone ({' / '.join(f'{e / 1e3:.0f} kHz' for e in EXPECTED_TONES_HZ)}) found within +-{TONE_TOLERANCE_HZ:.0f} Hz, at least {MIN_TONE_SNR_DB:.0f} dB above the local noise floor. Warning if more than {MAX_CLIP_FRACTION * 100:.1f} % of samples sit at the ADC limit.
 
 ### Connection test
 
@@ -724,6 +1017,7 @@ Boot info: `PCNT counts per 250 ms gate = {info['pcnt_counts']}`, `analogRead me
 
 ![Connection test](01_connection_test.png)
 ![Waveform](02_waveform.png)
+![Tones over time and burst pattern](09_fsk.png)
 ![Spectrum](03_spectrum.png)
 ![Spectrogram](04_spectrogram.png)
 ![Histogram](05_histogram.png)
@@ -735,10 +1029,9 @@ Raw captures: `data/*.npz` (`words` = raw 16-bit DMA words, `codes`/`mv` = un-sw
 Re-run: `cd ultrasonic_probe && uv run tools/analyze_signal.py`.
 """
     (out / "REPORT.md").write_text(report)
-    return ok, failures, notes
 
 
-def save(run, out: Path, timestamp: str, ok: bool, failures, notes):
+def save(run, out: Path, timestamp: str, result: dict):
     data = out / "data"
     data.mkdir(exist_ok=True)
     for mode, caps in run["captures"].items():
@@ -751,9 +1044,13 @@ def save(run, out: Path, timestamp: str, ok: bool, failures, notes):
     strip = lambda c: {k: v for k, v in c.items() if k not in ("words", "codes", "mv")}
     summary = {
         "timestamp": timestamp,
-        "verdict": "PASS" if ok else "FAIL",
-        "failures": failures,
-        "notes": notes,
+        "verdict": result["status"],
+        "failures": result["failures"],
+        "warnings": result["warnings"],
+        "notes": result["notes"],
+        "tones": result["tones"],
+        "bursts": {f"{e:.0f}": {k: v for k, v in b.items() if k != "pattern"} for e, b in run.get("bursts", {}).items()},
+        "timeline": run.get("timeline", []),
         "info": run["info"],
         "fs_true": run["fs_true"],
         "main_rate_cfg": run["main_rate_cfg"],
@@ -771,8 +1068,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", default="/dev/ttyACM0")
     ap.add_argument("--out", default=str(Path(__file__).resolve().parent.parent / "results"))
-    ap.add_argument("--trend", type=int, default=20, help="number of trend runs")
-    ap.add_argument("--captures", type=int, default=2, help="long captures per pull mode")
+    ap.add_argument("--trend", type=int, default=40, help="number of trend runs (~0.65 s each)")
+    ap.add_argument("--captures", type=int, default=3, help="long captures per pull mode")
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -784,6 +1081,7 @@ def main():
     finally:
         probe.close()
 
+    result = assess(run)  # also picks the per-tone captures the plots use
     plot_connection(run, out)
     plot_waveforms(run, out)
     plot_spectrum(run, out)
@@ -792,11 +1090,12 @@ def main():
     plot_trend(run, out)
     plot_sampler(run, out)
     plot_interference(run, out)
-    ok, failures, notes = write_report(run, out, timestamp)
-    save(run, out, timestamp, ok, failures, notes)
+    plot_fsk(run, out)
+    write_report(run, out, timestamp, result)
+    save(run, out, timestamp, result)
 
-    print(f"\nVERDICT: {'PASS' if ok else 'FAIL'}")
-    for line in failures + notes:
+    print(f"\nVERDICT: {result['status']}")
+    for line in [f"FAILURE: {f}" for f in result["failures"]] + [f"WARNING: {w}" for w in result["warnings"]] + result["notes"]:
         print(f"  - {line}")
     print(f"Report: {out / 'REPORT.md'}")
 

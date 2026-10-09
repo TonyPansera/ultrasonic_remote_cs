@@ -5,7 +5,7 @@ This folder holds ESP32 projects for the **LilyGO T-Display v1.1**. They are bui
 | Project | What it does |
 |---|---|
 | [`tdisplay_test/`](tdisplay_test) | Hardware test (screen, buttons, chip info) and template for new projects |
-| [`ultrasonic_probe/`](ultrasonic_probe) | Samples GPIO32 at ~249 kS/s and checks for a 40 kHz ultrasonic signal; host script makes graphs and a report ([latest report](ultrasonic_probe/results/REPORT.md)) |
+| [`ultrasonic_probe/`](ultrasonic_probe) | Samples GPIO32 at ~249 kS/s and checks the ultrasonic remote's 38 / 42 kHz FSK signal (live on screen); host script makes graphs and a report ([latest report](ultrasonic_probe/results/REPORT.md)) |
 
 Windows path to this folder (for VS Code or Explorer): `\\wsl.localhost\Ubuntu-26.04\home\tonyp\esp32`
 
