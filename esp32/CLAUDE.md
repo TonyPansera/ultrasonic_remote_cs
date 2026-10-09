@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This folder is part of the barlab repo (`~/signal_analysis`; merged from `~/esp32` on 2026-10-09). The root `CLAUDE.md` covers the Python analysis side.
 
-Workspace for ESP32 projects targeting a **LilyGO T-Display v1.1** (ESP32-D0WDQ6-V3, 4MB flash, no PSRAM, ST7789 135x240 TFT), built and flashed from WSL2 with PlatformIO. Each subfolder is a standalone PlatformIO project. `tdisplay_test/` is the working reference: copy its `platformio.ini` when starting a new project. See `README.md` for the user-facing guide.
+Workspace for ESP32 projects targeting a **LilyGO T-Display v1.1** (ESP32-D0WDQ6-V3, 4MB flash, no PSRAM, ST7789 135x240 TFT), built and flashed from WSL2 with PlatformIO. Each subfolder is a standalone PlatformIO project (`tdisplay_test`, `ultrasonic_probe`, `bar_detector`). `tdisplay_test/` is the working reference: copy its `platformio.ini` when starting a new project. See `README.md` for the user-facing guide.
 
 ## Toolchain versions (matter for API choice)
 
@@ -25,7 +25,7 @@ pio run -t clean
 pio pkg exec -p tool-esptoolpy -- esptool.py --port /dev/ttyACM0 flash_id   # check serial link, chip, flash size
 ```
 
-There are no tests or linters configured.
+No linters are configured. Only `bar_detector` has tests: `pio test -e native` (host, no board).
 
 `pio device monitor` needs a TTY, so Claude cannot use it. Read serial without it like this (it resets the board to capture the boot output):
 
@@ -65,6 +65,14 @@ The device is already bound (persisted), so `bind` (admin) is not needed again. 
 - The legacy PCNT driver enables a pull-up on its input pin, which precharges a floating node, so measure with `analogRead()` before configuring PCNT. But `analogRead()` leaves the pad on the RTC/analog mux, which disconnects PCNT's digital input: call `rtc_gpio_deinit()` + `pinMode(INPUT)` before PCNT, or it silently counts 0.
 - The signal is an FSK remote: 38 kHz and 42 kHz tones (each ±500 Hz accepted), sent as 50 bursts/s (~19 ms on / ~1 ms off) with silences between transmissions (the line idles at ~2.18 V with ~50-70 mVpp noise). Count a tone as signal only at ≥ 10 mV (`signal_present`); weaker lines are interference.
 - A ~0.3 mV line wandering around 41 kHz (plus an 83 kHz harmonic) appears even on an unconnected ADC pin, with the display asleep. It is supply/ground interference: never report a tone that weak as a signal.
+
+## bar_detector (40 / 50 kHz bar recognition)
+
+- The detector lives in `bar_detector/lib/tone_detector/` as plain C++11, with no Arduino headers. `src/main.cpp` runs it in a task on core 0 that reads every I2S DMA buffer; the display and serial run in `loop()` on core 1.
+- `pio test -e native` runs it on the PC, against synthetic signals and against `data/raw/rec4.wav` (→ 51 kHz bar) and `rec5.wav` (→ 40 kHz bar) at 384 kHz; it walks up to the barlab `pyproject.toml` to find them. Any change to the detector must keep these tests green and add a test.
+- The band centres (40 741.9 / 51 014.2 Hz) are barlab measurements; they are copied from `results/rec5|rec4/result.json`, not tuned.
+- The clipped 38/42 kHz FSK remote aliases onto exactly 51.0 kHz at 249 kS/s (19 × 42 kHz and 21 × 38 kHz = 798 kHz). That is why a detection requires a clean exponential ringdown, not just a level.
+- Not yet run on the board (2026-10-09). On first use, check `info` (`rate_meas`, `dc_mv`, `load_pct`) and calibrate with `lvl on`; see `bar_detector/README.md`.
 
 ## Display configuration (non-obvious)
 

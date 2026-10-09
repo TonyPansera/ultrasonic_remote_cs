@@ -16,7 +16,9 @@ The repository has two layers:
   apart from interpretation.
 
 Next to them, **`esp32/`** holds the PlatformIO firmware for a LilyGO T-Display (ESP32) that
-listens to the same ultrasound live. See [`esp32/README.md`](esp32/README.md).
+listens to the same ultrasound live. [`esp32/bar_detector/`](esp32/bar_detector) tells the ~40 kHz bar
+(40.74 kHz) from the ~50 kHz bar (51.01 kHz) measured here, and shows a different screen for each.
+See [`esp32/README.md`](esp32/README.md).
 
 ## Contents
 

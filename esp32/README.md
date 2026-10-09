@@ -1,11 +1,12 @@
 # ESP32 LilyGO T-Display: development from WSL2
 
-This folder holds ESP32 projects for the **LilyGO T-Display v1.1**. They are built and flashed from WSL2 (Ubuntu) with **PlatformIO**. Each subfolder is an independent project.
+This folder holds ESP32 projects for the **LilyGO T-Display v1.1**, inside the barlab repository (`~/signal_analysis`). They are built and flashed from WSL2 (Ubuntu) with **PlatformIO**. Each subfolder is an independent project.
 
 | Project | What it does |
 |---|---|
 | [`tdisplay_test/`](tdisplay_test) | Hardware test (screen, buttons, chip info) and template for new projects |
 | [`ultrasonic_probe/`](ultrasonic_probe) | Samples GPIO32 at ~249 kS/s and checks the ultrasonic remote's 38 / 42 kHz FSK signal (live on screen); host script makes graphs and a report ([latest report](ultrasonic_probe/results/REPORT.md)) |
+| [`bar_detector/`](bar_detector) | Listens on GPIO32 and tells the remote's ~40 kHz bar (40.74 kHz, blue screen) from its ~50 kHz bar (51.01 kHz, orange screen); detector unit-tested on the PC against the real recordings, not yet run on the board |
 
 Windows path to this folder (for VS Code or Explorer): `\\wsl.localhost\Ubuntu-26.04\home\tonyp\signal_analysis\esp32`
 
