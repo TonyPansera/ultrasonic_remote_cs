@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This folder is part of the barlab repo (`~/signal_analysis`; merged from `~/esp32` on 2026-10-09). The root `CLAUDE.md` covers the Python analysis side.
 
-Workspace for ESP32 projects targeting a **LilyGO T-Display v1.1** (ESP32-D0WDQ6-V3, 4MB flash, no PSRAM, ST7789 135x240 TFT), built and flashed from WSL2 with PlatformIO. Each subfolder is a standalone PlatformIO project (`tdisplay_test`, `ultrasonic_probe`, `bar_detector`). `tdisplay_test/` is the working reference: copy its `platformio.ini` when starting a new project. See `README.md` for the user-facing guide.
+Workspace for ESP32 projects targeting a **LilyGO T-Display v1.1** (ESP32-D0WDQ6-V3, 4MB flash, no PSRAM, ST7789 135x240 TFT), built and flashed from WSL2 with PlatformIO. Each subfolder is a standalone PlatformIO project (`tdisplay_test`, `ultrasonic_probe`, `bar_detector`, and `bar_detector_backup_40k_47k`, a frozen copy of bar_detector for the 40.7 / 42.78 kHz bars). `tdisplay_test/` is the working reference: copy its `platformio.ini` when starting a new project. See `README.md` for the user-facing guide.
 
 ## Toolchain versions (matter for API choice)
 
@@ -66,13 +66,20 @@ The device is already bound (persisted), so `bind` (admin) is not needed again. 
 - The signal is an FSK remote: 38 kHz and 42 kHz tones (each ±500 Hz accepted), sent as 50 bursts/s (~19 ms on / ~1 ms off) with silences between transmissions (the line idles at ~2.18 V with ~50-70 mVpp noise). Count a tone as signal only at ≥ 10 mV (`signal_present`); weaker lines are interference.
 - A ~0.3 mV line wandering around 41 kHz (plus an 83 kHz harmonic) appears even on an unconnected ADC pin, with the display asleep. It is supply/ground interference: never report a tone that weak as a signal.
 
-## bar_detector (40 / 50 kHz bar recognition)
+## bar_detector (38 / 47 kHz bar recognition)
 
 - The detector lives in `bar_detector/lib/tone_detector/` as plain C++11, with no Arduino headers. `src/main.cpp` runs it in a task on core 0 that reads every I2S DMA buffer; the display and serial run in `loop()` on core 1.
-- `pio test -e native` runs it on the PC, against synthetic signals and against `data/raw/rec4.wav` (→ 51 kHz bar) and `rec5.wav` (→ 40 kHz bar) at 384 kHz; it walks up to the barlab `pyproject.toml` to find them. Any change to the detector must keep these tests green and add a test.
-- The band centres (40 741.9 / 51 014.2 Hz) are barlab measurements; they are copied from `results/rec5|rec4/result.json`, not tuned.
-- The clipped 38/42 kHz FSK remote aliases onto exactly 51.0 kHz at 249 kS/s (19 × 42 kHz and 21 × 38 kHz = 798 kHz). That is why a detection requires a clean exponential ringdown, not just a level.
-- Not yet run on the board (2026-10-09). On first use, check `info` (`rate_meas`, `dc_mv`, `load_pct`) and calibrate with `lvl on`; see `bar_detector/README.md`.
+- `pio test -e native` runs it on the PC, against synthetic signals and against `data/raw/rec5.wav` and `rec4.wav` at 384 kHz; it walks up to the barlab `pyproject.toml` to find them. Both recordings hold bars that have since been replaced, so their tests move the band back: rec5 (40.7 kHz bar) puts band A at 40 741.9 Hz, rec4 (~51 kHz bar) puts band B at 51 014.2 Hz. Any change to the detector must keep these tests green and add a test.
+- Band A (38 000 Hz) is the bat detector's reading of the ~38 kHz bar that replaced the 40.7 kHz one on 2026-10-16; it is not measured yet. On the board, 10 of 10 strikes were detected as A at 49-68 dB, but `f_a` sat on the band's top bin (38 608 Hz) in 9 of them, so the line is at or just above ~38.6 kHz: re-centre after a `band a` scan with strikes (`EVT` lines only; `lvl on` tends to drop the USB/IP link). The 40.7 kHz / 42.78 kHz firmware is kept in `bar_detector_backup_40k_47k/`.
+- Band B (42 782 Hz) was measured on the board on 2026-10-16. That day the ~51 kHz bar was replaced by one the bat detector shows at ~43 and ~47 kHz.
+  - The GPIO32 receiver sees its 43 kHz line far better: 60-68 dB SNR and 9 of 11 strikes detected, against 34-53 dB and 1 of 5 for the 46.77 kHz line.
+  - The centre is the median of the 11 strikes.
+  - The tile still names that bar "47".
+- A and B are 4.8 kHz apart, so neither band's guard bins (1-2 kHz out) reach the other bar's line: both bars at once give BOTH (grey tile) unless one leads by 10 dB.
+- The clipped 38/42 kHz FSK remote sits on band A (38 kHz tone), next to band B (42 kHz tone), and aliases across the spectrum. That is why a detection requires a clean exponential ringdown, not just a level.
+- First run on the board on 2026-10-16. `info` gave `rate_meas=249031`, `bad_words=0`, `load_pct=43`, `load_max_pct=93`. Thresholds are not calibrated yet: calibrate with `lvl on` and real strikes (see `bar_detector/README.md`).
+- CPU budget: one Goertzel bin per pass with `-Os` took ~140 % of real time and the task watchdog reset the board every ~12 s. Four bins per pass, plus `-O2` in `platformio.ini`, brings it to ~47 %. More bins (wider `toleranceHz` or guards) cost time, so recheck `load_pct` after changing them.
+- `dc_mv=142` on that first run: GPIO32 sat near ground, not at the ~1650 mV expected with an AC-coupled, biased input. Check the front end before calibrating.
 
 ## Display configuration (non-obvious)
 

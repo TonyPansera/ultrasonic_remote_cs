@@ -1,4 +1,5 @@
-// Ringing-bar detector: tells a ~40 kHz bar from a ~50 kHz bar in a stream of ADC samples.
+// Ringing-bar detector: tells the ~38 kHz bar from the ~47 kHz bar (seen by its 42.8 kHz line) in a
+// stream of ADC samples.
 //
 // Pure C++11 with no Arduino headers, so the same code runs on the ESP32 (src/main.cpp) and in the
 // host unit tests (test/test_detector, `pio test -e native`), including on the real recordings.
@@ -12,13 +13,17 @@
 //
 // A block qualifies for a band when its best band bin is >= thresholdDb above baseline AND beats
 // every guard bin's SNR by guardMarginDb. The guard rule rejects broadband clicks (all bins rise)
-// and strong neighbouring tones (the FSK remote next to band A); a block passing it is "clean".
+// and strong neighbouring tones; a block passing it is "clean".
 // Peaks, frequencies and the decay test below only use clean blocks. triggerBlocks consecutive
 // qualifying blocks open an event. The event is reported (Phase::Detect) only once the strongest
 // band rings down like a bar: it is decayDb or more below its peak yet above the release level, and
 // its last confirmBlocks clean blocks fall on a straight line in dB (least squares: slope <=
 // -minDecayDbPerBlock, R^2 >= minDecayR2). A switched tone stops in one block; a fluctuating line
-// (the FSK remote's harmonics, which alias onto exactly 51.0 kHz at 249 kS/s) has no clean trend. The event closes (Phase::End) when both bands stay below
+// (the FSK remote's bursts: its 38 kHz tone sits inside band A, its 42 kHz tone just below band B)
+// has no clean trend.
+// The bands are 4.8 kHz apart, so neither band's guard bins (1-2 kHz out) reach the other bar's
+// line: both bars ringing at once give BOTH, unless one leads by decisionMarginDb.
+// The event closes (Phase::End) when both bands stay below
 // thresholdDb - releaseDb for releaseBlocks blocks. An event still open after maxEventMs is a steady
 // tone: it closes unconfirmed and the baselines are re-learned with it.
 // The band decision compares the peak SNRs: the winner must lead by decisionMarginDb, else BOTH.
@@ -39,8 +44,13 @@ const int kMaxConfirmBlocks = 16;
 struct Config {
   float sampleRateHz = 249000.0f;  // the real rate (the ESP32 measures it at boot)
   int blockSize = 2048;            // 8.2 ms and 122 Hz bins at 249 kS/s
-  // Band centres from barlab: rec5 40 741.9 Hz (the ~40 kHz bar), rec4 51 014.2 Hz (the ~50 kHz bar).
-  float centerHz[2] = {40741.9f, 51014.2f};
+  // A: the ~38 kHz bar, which replaced the 40 741.9 Hz one (rec5) on 2026-10-16. 38 000 Hz is the
+  // bat detector's reading, not yet measured on the board: check f_a in the EVT lines.
+  // B: the ~47 kHz bar, which replaced the ~51 kHz one (rec4) on 2026-10-16. The bat detector shows
+  // it at ~43 and ~47 kHz. The GPIO32 receiver sees the 43 kHz line far better: 60-68 dB SNR, 9 of
+  // 11 strikes detected, against 34-53 dB and 1 of 5 for the 46.77 kHz line. So B tracks 42 782 Hz,
+  // the median of the 11 board strikes (42 747-42 802 Hz).
+  float centerHz[2] = {38000.0f, 42782.0f};
   float toleranceHz = 500.0f;    // band bins cover center +- tolerance (temperature, sensor, unit spread)
   float guardInnerHz = 1000.0f;  // guard bins from center +- guardInnerHz ...
   float guardOuterHz = 2000.0f;  // ... to center +- guardOuterHz
@@ -104,6 +114,11 @@ class ToneDetector {
   float binHz() const { return binHz_; }
   int bandBins(int band) const { return bandCount_[band]; }
   uint64_t blocksProcessed() const { return blockIndex_; }
+  // Every bin (band A, guards A, band B, guards B) and its power in the last block, as squared sine
+  // amplitude in input units.
+  int binCount() const { return (int)bins_.size(); }
+  float binFreqHz(int j) const { return bins_[j].freqHz; }
+  float binPower(int j) const { return power_[j]; }
 
  private:
   struct Bin {

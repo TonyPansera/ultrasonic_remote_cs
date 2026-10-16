@@ -1,12 +1,12 @@
 // Bar detector for the LilyGO T-Display v1.1.
 //
 // Listens on GPIO32 (ADC1 channel 4) through the I2S built-in-ADC DMA path (~249 kS/s; ADC setup
-// adapted from ../ultrasonic_probe) and tells the remote's ~40 kHz bar (40.74 kHz) from its ~50 kHz
-// bar (51.01 kHz) with lib/tone_detector. Every DMA buffer is analysed, with no gaps, by a task on
-// core 0; the screen and the serial protocol run in loop() on core 1.
+// adapted from ../ultrasonic_probe) and tells the remote's ~38 kHz bar from its ~47 kHz
+// bar (seen by its 42.78 kHz line) with lib/tone_detector. Every DMA buffer is analysed, with no
+// gaps, by a task on core 0; the screen and the serial protocol run in loop() on core 1.
 //
 // Screen: LISTENING shows one SNR meter per band. A detected strike fills the screen for 2 s with
-// the band's colour: blue "40 kHz", orange "50 kHz", or grey "40+50?" when neither band leads by
+// the band's colour: blue "38 kHz", orange "47 kHz", or grey "38+47?" when neither band leads by
 // decisionMarginDb. The measured frequency, peak SNR, ring time and hit count are shown under it.
 // Right button (GPIO35): forget the noise baselines and the counters, learn again (1 s, keep quiet).
 //
@@ -43,8 +43,9 @@ constexpr uint32_t METER_PERIOD_MS = 100;
 constexpr uint32_t LVL_PERIOD_MS = 50;
 constexpr uint32_t CLIP_SHOW_MS = 1000;
 
-// Tile names of the two bars (font 8 has digits only). The measured frequency is shown under them.
-const char *BAND_NAME[2] = {"40", "50"};
+// Tile names of the two bars (font 8 has digits only). The measured frequency of the tracked line is
+// shown under them: the "47" bar is detected by its 42.78 kHz line.
+const char *BAND_NAME[2] = {"38", "47"};
 const uint16_t BAND_COLOR[2] = {TFT_BLUE, TFT_ORANGE};
 const uint16_t BAND_TEXT[2] = {TFT_WHITE, TFT_BLACK};
 const uint16_t METER_COLOR[2] = {TFT_SKYBLUE, TFT_ORANGE};
@@ -71,8 +72,8 @@ struct Shared {
   uint16_t maxCode;
   bool clipSeen;      // a sample at 0 or 4095 since loop() last cleared it
   uint32_t badWords;  // samples carrying the wrong ADC channel bits
-  float loadPct;      // detector time per DMA buffer / buffer duration (average)
-  float loadMaxPct;   // worst buffer since boot; above 100 % the DMA queue starts to fill
+  float loadPct;      // detector time per DMA buffer / buffer duration (average); above 100 % samples are lost
+  float loadMaxPct;   // worst buffer since boot; a block is processed every second buffer, so up to ~200 % is fine
 } shared;
 struct Pending {
   bool reset;
@@ -246,7 +247,7 @@ void drawMeters(const Shared &s) {
   tft.setTextDatum(TL_DATUM);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.setTextPadding(tft.width() - 8);
-  snprintf(text, sizeof(text), "hits 40k:%lu 50k:%lu ?:%lu", (unsigned long)hits[0], (unsigned long)hits[1],
+  snprintf(text, sizeof(text), "hits 38k:%lu 47k:%lu ?:%lu", (unsigned long)hits[0], (unsigned long)hits[1],
            (unsigned long)hits[2]);
   tft.drawString(text, 4, 94, 2);
   float vpp = s.maxCode >= s.minCode ? (float)codeToMv(s.maxCode) - (float)codeToMv(s.minCode) : 0;
@@ -272,7 +273,7 @@ void drawTile(const Event &e) {
   } else {
     tft.setTextDatum(TC_DATUM);
     tft.setTextSize(2);
-    tft.drawString("40+50?", tft.width() / 2, 16, 4);
+    tft.drawString("38+47?", tft.width() / 2, 16, 4);
     tft.setTextSize(1);
   }
 
@@ -413,7 +414,9 @@ void setup() {
   detector.setCallback(onDetectorEvent, nullptr);
   shared.minCode = 4095;
   shared.maxCode = 0;
-  // Core 0 is free (no Wi-Fi). The task blocks in i2s_read between buffers, so the idle task still runs.
+  // Core 0 is free (no Wi-Fi). The task blocks in i2s_read between buffers, so the idle task still runs,
+  // as long as load_pct stays under 100 %. Above it the task never blocks, IDLE0 starves and the task
+  // watchdog resets the board every ~12 s (seen on the first board run, at ~140 %).
   xTaskCreatePinnedToCore(samplingTask, "sampling", 8192, nullptr, 5, nullptr, 0);
 
   drawListeningFrame();

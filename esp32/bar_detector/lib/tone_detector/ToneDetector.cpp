@@ -11,6 +11,12 @@ const float kTiny = 1e-30f;
 
 float toDb(float power) { return 10.0f * log10f(power > kTiny ? power : kTiny); }
 
+// |X|^2 of a Goertzel recurrence (state s1, s2 after the last sample), times scale.
+inline float goertzelPower(float c, float s1, float s2, float scale) {
+  float p = (s1 * s1 + s2 * s2 - c * s1 * s2) * scale;
+  return p > kTiny ? p : kTiny;
+}
+
 }  // namespace
 
 const char *bandName(Band band) {
@@ -200,16 +206,44 @@ void ToneDetector::processBlock() {
   mean /= n_;
   for (int i = 0; i < n_; i++) block_[i] = (block_[i] - mean) * window_[i];
 
-  for (size_t j = 0; j < bins_.size(); j++) {
-    float c = bins_[j].coeff;
+  // Goertzel, four bins per pass over the block. Their recurrences are independent, so the ESP32 FPU
+  // overlaps them instead of waiting out each one's latency, and each sample is loaded once per four
+  // bins. Each bin's arithmetic is unchanged.
+  const float *x = block_.data();
+  const size_t nBins = bins_.size();
+  size_t j = 0;
+  for (; j + 4 <= nBins; j += 4) {
+    const float c0 = bins_[j].coeff, c1 = bins_[j + 1].coeff, c2 = bins_[j + 2].coeff, c3 = bins_[j + 3].coeff;
+    float a1 = 0, a2 = 0, b1 = 0, b2 = 0, d1 = 0, d2 = 0, e1 = 0, e2 = 0;
+    for (int i = 0; i < n_; i++) {
+      const float xi = x[i];
+      const float a0 = xi + c0 * a1 - a2;
+      const float b0 = xi + c1 * b1 - b2;
+      const float d0 = xi + c2 * d1 - d2;
+      const float e0 = xi + c3 * e1 - e2;
+      a2 = a1;
+      a1 = a0;
+      b2 = b1;
+      b1 = b0;
+      d2 = d1;
+      d1 = d0;
+      e2 = e1;
+      e1 = e0;
+    }
+    power_[j] = goertzelPower(c0, a1, a2, powerScale_);
+    power_[j + 1] = goertzelPower(c1, b1, b2, powerScale_);
+    power_[j + 2] = goertzelPower(c2, d1, d2, powerScale_);
+    power_[j + 3] = goertzelPower(c3, e1, e2, powerScale_);
+  }
+  for (; j < nBins; j++) {
+    const float c = bins_[j].coeff;
     float s1 = 0, s2 = 0;
     for (int i = 0; i < n_; i++) {
-      float s0 = block_[i] + c * s1 - s2;
+      const float s0 = x[i] + c * s1 - s2;
       s2 = s1;
       s1 = s0;
     }
-    float p = (s1 * s1 + s2 * s2 - c * s1 * s2) * powerScale_;
-    power_[j] = p > kTiny ? p : kTiny;
+    power_[j] = goertzelPower(c, s1, s2, powerScale_);
   }
 
   levels_.clipped = blockClipped_;

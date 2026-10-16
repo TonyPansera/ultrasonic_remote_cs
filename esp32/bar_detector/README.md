@@ -1,23 +1,40 @@
-# bar_detector: which bar rang, 40 kHz or 50 kHz?
+# bar_detector: which bar rang, 38 kHz or 47 kHz?
 
 Firmware for the LilyGO T-Display. It listens to GPIO32 at ~249 kS/s and recognises the two bars of
 the ultrasonic remote by their ringing, then shows a different screen for each:
 
 | Strike | Screen |
 |---|---|
-| ~40 kHz bar (40.74 kHz) | **blue** tile, `40 kHz`, measured frequency |
-| ~50 kHz bar (51.01 kHz) | **orange** tile, `50 kHz`, measured frequency |
-| both bands within 10 dB | **grey** tile, `40+50?` (ambiguous; never forced) |
+| ~38 kHz bar | **blue** tile, `38 kHz`, measured frequency |
+| ~47 kHz bar (detected by its 42.78 kHz line) | **orange** tile, `47 kHz`, measured frequency |
+| both bands within 10 dB | **grey** tile, `38+47?` (ambiguous; never forced) |
 | nothing | `LISTENING`, with one live SNR meter per band |
 
-The band centres come from barlab's analysis of `data/raw/rec5.wav` (40 741.9 Hz) and
-`data/raw/rec4.wav` (51 014.2 Hz). See
-[`results/reports/2026-10-09_batch-summary.md`](../../results/reports/2026-10-09_batch-summary.md).
+Where the band centres come from:
+- **Band A, 38 000 Hz:** the bat detector's reading of the ~38 kHz bar, which replaced the 40.7 kHz
+  bar on 2026-10-16. It is not a measurement yet:
+  - on the board, 10 of 10 strikes were detected as A at 49-68 dB;
+  - but `f_a` sat on the band's top bin (38 608 Hz) in 9 of them, and one gave 38 501.8 Hz, so the
+    line is at or just above ~38.6 kHz. Re-centre band A after a `band a` scan with strikes.
 
-**Status (2026-10-09): not tested on the board yet.**
-- It compiles (RAM 9.5 %, flash 28 %).
-- Its detector passes the host tests, including the two real recordings.
-- The thresholds still need a check with the real sensor (see [First run](#first-run)).
+  Until 2026-10-16, band A was 40 741.9 Hz, from barlab's analysis of `data/raw/rec5.wav` (see
+  [`results/reports/2026-10-09_batch-summary.md`](../../results/reports/2026-10-09_batch-summary.md)).
+  That firmware is kept in `../bar_detector_backup_40k_47k/`.
+- **Band B, 42 782 Hz:** measured on the board on 2026-10-16. That day the ~51 kHz bar (rec4) was
+  replaced by a bar that the bat detector shows at ~43 and ~47 kHz. The GPIO32 receiver sees the
+  43 kHz line much better than the 47 kHz one (`band b` scan, 30 s of strikes each):
+
+  | Band B centre | Strikes detected | Measured frequency | Peak SNR |
+  |---|---|---|---|
+  | 42 760 Hz | 9 of 11 | 42 747-42 802 Hz (median 42 782) | 60-68 dB |
+  | 47 000 Hz | 1 of 5 | 46 735-46 802 Hz | 34-53 dB, guards close behind |
+
+**Status (2026-10-16):**
+- It runs on the board: `load_pct` ~43, no watchdog resets.
+- The ~38 kHz bar is detected as A (10 of 10 strikes in the first check), and the ~47 kHz bar as B,
+  through its 42.78 kHz line.
+- Every strike of either bar drives the receiver past both ADC limits (`CLIP`). The detection
+  still works.
 
 ## How it detects
 
@@ -34,13 +51,17 @@ The detector is in `lib/tone_detector/` (plain C++, also compiled on the PC for 
 - **Trigger:** a band triggers when its best bin is ≥ 15 dB above its baseline for 2 blocks, and
   stands ≥ 6 dB clear of its guard bins. That rejects:
   - the broadband click of the impact;
-  - the 38/42 kHz FSK remote next to the 40 kHz band.
+  - strong tones next to a band.
 - **Confirmation:** the strike only counts once the line **rings down like a bar**. That means a
   4 dB drop from the peak, with the last 5 blocks falling on a straight line in dB.
   - A tone that is switched on or off is not reported.
-  - Neither are the FSK remote's clipped harmonics. Two of them alias onto exactly 51.0 kHz at
-    249 kS/s: 19 × 42 kHz and 21 × 38 kHz both give 798 kHz, minus 3 × 249 kHz.
+  - Neither is the FSK remote. Its 38 kHz tone sits inside band A, its 42 kHz tone 0.8 kHz below
+    band B, and its clipped harmonics alias across the spectrum, but its bursts never decay like a
+    bar.
 - **Decision:** the band with the higher peak SNR wins if it leads by ≥ 10 dB.
+- **The bands are 4.8 kHz apart,** so neither band's guard bins (1-2 kHz out) reach the other bar's
+  line. If both bars ring at once, both bands are clean: the grey `38+47?` tile, unless one leads by
+  10 dB.
 
 Typical delay from strike to screen: 50-100 ms.
 
@@ -52,10 +73,13 @@ recordings reach 67 dB (rec4) and 51 dB (rec5).
 
 The analog signal goes into **GPIO32**, the same pin and ADC path as `ultrasonic_probe`.
 
-1. **Now: the receiver already on GPIO32.** If it is a 40 kHz resonant piezo receiver, it passes
-   40.7 kHz well but attenuates 51 kHz strongly (often 20-30 dB). Watch the `51.0k` meter while you
-   strike the 50 kHz bar. If it barely moves, that receiver cannot see the 50 kHz bar: use a
-   broadband mic.
+1. **Now: the receiver already on GPIO32.** It favours 40-43 kHz:
+   - the ~47 kHz bar's 46.8 kHz line arrives ~13 dB weaker than its 42.8 kHz line, which is why band
+     B tracks 42.8 kHz;
+   - its output idles at ~2.17 V and is driven (the internal pulls do not move it).
+
+   If `DC` drops to 0.14 V with a permanent `CLIP`, the receiver has lost its supply: check its
+   VCC/GND wires. This happened twice on 2026-10-16, when the wires got bumped during strikes.
 2. **Later: a broadband ultrasonic mic** (MEMS or electret, flat to > 60 kHz) with a preamp.
 
 For both:
@@ -76,7 +100,7 @@ For both:
   - **Meters:** one per band; each shows the SNR of the best bin in dB. The white tick is the
     threshold, and the bar turns green above it.
   - **Bottom lines:**
-    - hit counters (`40k`, `50k`, `?` = ambiguous);
+    - hit counters (`38k`, `47k`, `?` = ambiguous);
     - input DC level, Vpp over the last 100 ms, and the measured sample rate.
 - **Detection tile:**
   - **Content:** the colour and big name of the bar, its measured frequency, the peak SNR, `ring`
@@ -89,7 +113,7 @@ the sensor or changing the gain.
 
 ## First run
 
-These steps need the board attached. Nothing has been run on it yet.
+These steps need the board attached.
 
 ```bash
 cd ~/signal_analysis/esp32/bar_detector
@@ -103,8 +127,10 @@ opening the port resets the board, so wait for `READY`):
    - `rate_meas`: expect ~249000;
    - `dc_mv`: expect ~1650 when AC-coupled;
    - `bad_words`: expect 0;
-   - `load_pct` / `load_max_pct`: the detector's CPU time per DMA buffer, which must stay well
-     under 100.
+   - `load_pct`: the detector's CPU time per DMA buffer, averaged. It must stay well under 100
+     (~43 on the board); above 100 the task watchdog resets the board every ~12 s.
+   - `load_max_pct`: the worst buffer. A 2048-sample block is processed every second 1024-sample
+     buffer, so up to ~200 is fine (~93 on the board).
 2. **Calibrate:** `lvl on` streams the per-band SNR. Strike each bar a few times and note the peak
    `snr_a` / `snr_b`:
    - the struck band should peak well above 15 dB;
@@ -142,21 +168,31 @@ pio test -e native
 
 `test/test_detector/test_main.cpp` covers:
 - **Synthetic strikes at 249 kS/s:**
-  - 40.7 kHz → A, 51.0 kHz → B;
-  - weak, clipped, both bars at once (→ BOTH), and two strikes in a row.
+  - 38 kHz → A, 42.78 kHz → B, also when clipped at both ADC limits as on the board;
+  - a weak strike, and two strikes in a row;
+  - both bars at once → BOTH;
+  - a strike right after an FSK transmission on its 38 kHz tone (inside band A) → A.
 - **Things that must not be reported:**
   - noise;
   - clicks alone;
   - a steady tone;
   - a tone switched on, or switched on and off;
   - the clipped 38/42 kHz FSK remote.
-- **The real recordings `data/raw/rec4.wav` → B and `rec5.wav` → A:**
+- **The real recordings:**
+  - `rec5.wav` → A, with band A moved back to 40 741.9 Hz;
+  - `rec4.wav` → B, with band B moved back to 51 014.2 Hz.
+
+  Both bars in these recordings have been replaced, but they are still the only real ringdowns.
+
+  Both are:
   - read at their native 384 kHz, without resampling;
   - skipped when `data/raw/` is missing.
 
   On 2026-10-09 the detector found:
   - **rec4:** 51 017.5 Hz at 67 dB, ringing for 0.96 s;
   - **rec5:** 40 745.3 Hz at 51 dB, with the 51 kHz band 30 dB lower.
+
+  On 2026-10-16, with band B at 42.78 kHz, rec5 still gives A only (40 745.3 Hz at 50.9 dB).
 
 Every change to `lib/tone_detector/` needs these tests to pass, plus a new test for the behaviour it
 changes.
