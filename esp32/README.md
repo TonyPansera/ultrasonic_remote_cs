@@ -6,7 +6,8 @@ This folder holds ESP32 projects for the **LilyGO T-Display v1.1**, inside the b
 |---|---|
 | [`tdisplay_test/`](tdisplay_test) | Hardware test (screen, buttons, chip info) and template for new projects |
 | [`ultrasonic_probe/`](ultrasonic_probe) | Samples GPIO32 at ~249 kS/s and checks the ultrasonic remote's 38 / 42 kHz FSK signal (live on screen); host script makes graphs and a report ([latest report](ultrasonic_probe/results/REPORT.md)) |
-| [`bar_detector/`](bar_detector) | Listens on GPIO32 and tells the remote's ~40 kHz bar (40.74 kHz, blue screen) from its ~50 kHz bar (51.01 kHz, orange screen); detector unit-tested on the PC against the real recordings, not yet run on the board |
+| [`bar_detector/`](bar_detector) | Prototype 1: listens on GPIO32 (analog ultrasonic receiver) and tells the remote's ~38 kHz bar (blue screen) from its ~47 kHz bar (orange screen); detector unit-tested on the PC against the real recordings, runs on the first board |
+| [`bar_detector_v2/`](bar_detector_v2) | Prototype 2, on a second board: same detector, fed by an SPH0641 PDM MEMS mic (CLK GPIO22, DATA GPIO21) read as a raw bitstream and decimated to 192 kS/s in software |
 
 Windows path to this folder (for VS Code or Explorer): `\\wsl.localhost\Ubuntu-26.04\home\tonyp\signal_analysis\esp32`
 

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This folder is part of the barlab repo (`~/signal_analysis`; merged from `~/esp32` on 2026-10-09). The root `CLAUDE.md` covers the Python analysis side.
 
-Workspace for ESP32 projects targeting a **LilyGO T-Display v1.1** (ESP32-D0WDQ6-V3, 4MB flash, no PSRAM, ST7789 135x240 TFT), built and flashed from WSL2 with PlatformIO. Each subfolder is a standalone PlatformIO project (`tdisplay_test`, `ultrasonic_probe`, `bar_detector`, and `bar_detector_backup_40k_47k`, a frozen copy of bar_detector for the 40.7 / 42.78 kHz bars). `tdisplay_test/` is the working reference: copy its `platformio.ini` when starting a new project. See `README.md` for the user-facing guide.
+Workspace for ESP32 projects targeting a **LilyGO T-Display v1.1** (ESP32-D0WDQ6-V3, 4MB flash, no PSRAM, ST7789 135x240 TFT), built and flashed from WSL2 with PlatformIO. Each subfolder is a standalone PlatformIO project (`tdisplay_test`, `ultrasonic_probe`, `bar_detector` (prototype 1, GPIO32 receiver), `bar_detector_v2` (prototype 2, PDM MEMS mic, on a second board), and `bar_detector_backup_40k_47k`, a frozen copy of bar_detector for the 40.7 / 42.78 kHz bars). Versions are kept as separate folders: never overwrite an earlier prototype's folder. `tdisplay_test/` is the working reference: copy its `platformio.ini` when starting a new project. See `README.md` for the user-facing guide.
 
 ## Toolchain versions (matter for API choice)
 
@@ -25,7 +25,7 @@ pio run -t clean
 pio pkg exec -p tool-esptoolpy -- esptool.py --port /dev/ttyACM0 flash_id   # check serial link, chip, flash size
 ```
 
-No linters are configured. Only `bar_detector` has tests: `pio test -e native` (host, no board).
+No linters are configured. Only `bar_detector` and `bar_detector_v2` have tests: `pio test -e native` (host, no board).
 
 `pio device monitor` needs a TTY, so Claude cannot use it. Read serial without it like this (it resets the board to capture the boot output):
 
@@ -66,7 +66,7 @@ The device is already bound (persisted), so `bind` (admin) is not needed again. 
 - The signal is an FSK remote: 38 kHz and 42 kHz tones (each ±500 Hz accepted), sent as 50 bursts/s (~19 ms on / ~1 ms off) with silences between transmissions (the line idles at ~2.18 V with ~50-70 mVpp noise). Count a tone as signal only at ≥ 10 mV (`signal_present`); weaker lines are interference.
 - A ~0.3 mV line wandering around 41 kHz (plus an 83 kHz harmonic) appears even on an unconnected ADC pin, with the display asleep. It is supply/ground interference: never report a tone that weak as a signal.
 
-## bar_detector (38 / 47 kHz bar recognition)
+## bar_detector (prototype 1: 38 / 47 kHz bar recognition on GPIO32)
 
 - The detector lives in `bar_detector/lib/tone_detector/` as plain C++11, with no Arduino headers. `src/main.cpp` runs it in a task on core 0 that reads every I2S DMA buffer; the display and serial run in `loop()` on core 1.
 - `pio test -e native` runs it on the PC, against synthetic signals and against `data/raw/rec5.wav` and `rec4.wav` at 384 kHz; it walks up to the barlab `pyproject.toml` to find them. Both recordings hold bars that have since been replaced, so their tests move the band back: rec5 (40.7 kHz bar) puts band A at 40 741.9 Hz, rec4 (~51 kHz bar) puts band B at 51 014.2 Hz. Any change to the detector must keep these tests green and add a test.
@@ -80,6 +80,27 @@ The device is already bound (persisted), so `bind` (admin) is not needed again. 
 - First run on the board on 2026-10-16. `info` gave `rate_meas=249031`, `bad_words=0`, `load_pct=43`, `load_max_pct=93`. Thresholds are not calibrated yet: calibrate with `lvl on` and real strikes (see `bar_detector/README.md`).
 - CPU budget: one Goertzel bin per pass with `-Os` took ~140 % of real time and the task watchdog reset the board every ~12 s. Four bins per pass, plus `-O2` in `platformio.ini`, brings it to ~47 %. More bins (wider `toleranceHz` or guards) cost time, so recheck `load_pct` after changing them.
 - `dc_mv=142` on that first run: GPIO32 sat near ground, not at the ~1650 mV expected with an AC-coupled, biased input. Check the front end before calibrating.
+
+## bar_detector_v2 (prototype 2: SPH0641 PDM MEMS mic)
+
+- **Board and mic:**
+  - Its T-Display: MAC `30:c6:f7:25:ad:f0`, COM6, usbipd BUSID `3-2` on the current port, bound on 2026-10-23.
+    - It replaced `a0:dd:6c:71:14:04` (COM4), whose screen was faulty.
+    - The first board (prototype 1) is COM3, MAC `A0:DD:6C:72:CD:2C`.
+    - Each new board needs a one-time `usbipd bind` (UAC prompt).
+  - The mic is an Elecrow module with a Syntiant/Knowles SPH0641LU4H-1: CLK on GPIO22, DATA on GPIO21, SEL to GND.
+- **Layout:** `lib/tone_detector` and `test/test_detector` are byte-identical copies of `bar_detector`'s. Keep them so (`diff -r`), and put v2-specific settings in `lib/device_config/DeviceConfig.h`, which both `main.cpp` and the tests use.
+- **Clock modes and wake-up:** the mic's ultrasonic mode is a 3.072-4.8 MHz clock. The datasheet forbids waking from sleep (clock < 250 kHz, as on every ESP32 reset) straight into it, so `startMic()` runs 2.4 MHz for 100 ms, then `i2s_set_clk()` to 3.072 MHz.
+- **No hardware PDM decoder:** the ESP32's own PDM RX decimates by 64/128 only (48 kS/s max at 3.072 MHz), which is useless for the bars. So I2S0 is a standard 32-bit stereo master RX (BCK = mic clock, APLL, `ws`/`mck` = `I2S_PIN_NO_CHANGE`; mck left at 0 would drive GPIO0). The DMA delivers the raw bitstream, first bit at bit 31, and **in time order**: verified on the board, where `pdm swap 1` raises the broadband RMS from -55 to -26 dBFS.
+- **Decimator** (`lib/pdm_decimator`): a byte-LUT FIR, 256 taps, decimation by 16, so 192 kS/s. Detector blocks are 1536 samples (8 ms, 125 Hz bins). On the board: `load_pct` ~64, of which `dec_pct` ~31, and `load_max_pct` 68.
+- **Bands, measured 2026-10-23 with `spec on`** (`lib/strike_spectrum`: FFTs early and late after each strike's click; lines in 20-90 kHz with their 40 ms drop):
+  - **A:** 38 618 Hz, the ~38 kHz bar (38 595.5 Hz struck, 38 606-38 650 Hz in sympathy).
+  - **B:** 47 088 Hz, the other bar (11 strikes, 47 081-47 114 Hz, second line 45.37 kHz). Its old 42.78 kHz line was gone.
+  - **Tolerance:** ±300 Hz.
+- **False detections from background noise:** a clickless 38.00 kHz background source (FSK-remote-like, with a faint 42.7-43.2 kHz line), fading in the room's reverberation, was detected as A every few seconds while A sat at 38.0 kHz ±500 Hz. The user confirmed it is background noise, not strikes. An acoustic mic hears reverberant fades as ringdowns, which prototype 1's wired receiver did not. Regression test: `test_chain_reverberant_remote_is_not_a_bar`.
+- **Sympathetic ringing:** every strike of the 47 bar also rings the 38 bar's line, 25-40 dB weaker. B must therefore lead by the 10 dB decision margin.
+- **Memory:** `spec` needs ~90 KB of heap. Allocating it in a global constructor threw `std::bad_alloc` and boot-looped the board, so it is allocated in `setup()`. Keep `double` out of per-sample loops: the ESP32 has no double FPU, and one such accumulator cost 16 % of a core.
+- **Testing the decimator:** `test_pdm` uses a 2nd-order sigma-delta model. That model itself puts a spur on 42 kHz from a strong (-10 dBFS) 150 kHz tone, so the alias test runs at -30 dBFS (the FIR alone gives -102 dB at 150 kHz).
 
 ## Display configuration (non-obvious)
 
