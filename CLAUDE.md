@@ -149,6 +149,10 @@ Cross-cutting:
   board only when the user says the board is attached.
 - barlab's Python rules (no DSP outside `barlab/`) don't cover firmware. Firmware DSP gets a
   host-side unit test instead (`pio test -e native`).
+- The current prototype is `esp32/bar_detector_v3` (since 2026-10-30). Its board measurement
+  sessions are logged with `tools/session.py` into `measurements/<date>/` and summarised by
+  `uv run python esp32/bar_detector_v3/tools/analyze_sessions.py` (no DSP: it parses the board's
+  numbers).
 
 ## Analysing recordings
 

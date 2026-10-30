@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This folder is part of the barlab repo (`~/signal_analysis`; merged from `~/esp32` on 2026-10-09). The root `CLAUDE.md` covers the Python analysis side.
 
-Workspace for ESP32 projects targeting a **LilyGO T-Display v1.1** (ESP32-D0WDQ6-V3, 4MB flash, no PSRAM, ST7789 135x240 TFT), built and flashed from WSL2 with PlatformIO. Each subfolder is a standalone PlatformIO project (`tdisplay_test`, `ultrasonic_probe`, `bar_detector` (prototype 1, GPIO32 receiver), `bar_detector_v2` (prototype 2, PDM MEMS mic, on a second board), and `bar_detector_backup_40k_47k`, a frozen copy of bar_detector for the 40.7 / 42.78 kHz bars). Versions are kept as separate folders: never overwrite an earlier prototype's folder. `tdisplay_test/` is the working reference: copy its `platformio.ini` when starting a new project. See `README.md` for the user-facing guide.
+Workspace for ESP32 projects targeting a **LilyGO T-Display v1.1** (ESP32-D0WDQ6-V3, 4MB flash, no PSRAM, ST7789 135x240 TFT), built and flashed from WSL2 with PlatformIO. Each subfolder is a standalone PlatformIO project (`tdisplay_test`, `ultrasonic_probe`, `bar_detector` (prototype 1, GPIO32 receiver), `bar_detector_v2` (prototype 2, PDM MEMS mic, on a second board), `bar_detector_v3` (prototype 3, the current one: prototype 2's board and mic, with re-measured bands and overtone-checked decisions), and `bar_detector_backup_40k_47k`, a frozen copy of bar_detector for the 40.7 / 42.78 kHz bars). Versions are kept as separate folders: never overwrite an earlier prototype's folder. `tdisplay_test/` is the working reference: copy its `platformio.ini` when starting a new project. See `README.md` for the user-facing guide.
 
 ## Toolchain versions (matter for API choice)
 
@@ -25,7 +25,7 @@ pio run -t clean
 pio pkg exec -p tool-esptoolpy -- esptool.py --port /dev/ttyACM0 flash_id   # check serial link, chip, flash size
 ```
 
-No linters are configured. Only `bar_detector` and `bar_detector_v2` have tests: `pio test -e native` (host, no board).
+No linters are configured. Only `bar_detector`, `bar_detector_v2` and `bar_detector_v3` have tests: `pio test -e native` (host, no board).
 
 `pio device monitor` needs a TTY, so Claude cannot use it. Read serial without it like this (it resets the board to capture the boot output):
 
@@ -101,6 +101,40 @@ The device is already bound (persisted), so `bind` (admin) is not needed again. 
 - **Sympathetic ringing:** every strike of the 47 bar also rings the 38 bar's line, 25-40 dB weaker. B must therefore lead by the 10 dB decision margin.
 - **Memory:** `spec` needs ~90 KB of heap. Allocating it in a global constructor threw `std::bad_alloc` and boot-looped the board, so it is allocated in `setup()`. Keep `double` out of per-sample loops: the ESP32 has no double FPU, and one such accumulator cost 16 % of a core.
 - **Testing the decimator:** `test_pdm` uses a 2nd-order sigma-delta model. That model itself puts a spur on 42 kHz from a strong (-10 dBFS) 150 kHz tone, so the alias test runs at -30 dBFS (the FIR alone gives -102 dB at 150 kHz).
+
+## bar_detector_v3 (prototype 3: overtone-checked decisions, current)
+
+- **Hardware:** the same board and mic as prototype 2 (MAC `30:c6:f7:25:ad:f0`, BUSID `3-2`). `lib/tone_detector`, `lib/pdm_decimator` and `test/test_detector` are unchanged copies, and `tone_detector` must stay byte-identical to v1's.
+- **Measured on 2026-10-30, after the user changed the prototype** (`measurements/REPORT.md`, logs in `measurements/2026-10-30/`):
+  - **38 bar:** 38 418 Hz, with an overtone at 33 917 Hz (ratio 0.88313). It moved down ~200 Hz.
+  - **47 bar:** 47 110 Hz, with an overtone at 45 386 Hz (ratio 0.96331). Each ratio holds within ±0.3 %.
+  - **Bars:** the 38 bar is 63 mm, the 47 bar is 50 mm, d = 16 mm, both held by a rod through a centre hole. No 2f shows on the board.
+  - **Background:** the ~40 kHz / 38.00 kHz background source was off all day.
+- **Bands** (DeviceConfig):
+  - A is 38 500 Hz and B is 47 110 Hz, ±200 Hz (±2 bins).
+  - Guards are 1.0-1.375 kHz. The 47 bar's overtone, now as loud as its fundamental, sat in B's old 1-2 kHz guards: 2 of 16 strikes were missed and others came late.
+  - A's bottom bin (38 250 Hz) stays 250 Hz off the 38.00 kHz background. At 38 420 Hz, `test_chain_reverberant_remote_is_not_a_bar` failed.
+- **`lib/strike_spectrum`:**
+  - **Watched lines:** after each capture it measures watched lines (`kWatch`, up to 12), each with early, late and **before** (the 4096 samples ahead of the click, from a ring) levels.
+  - **Triggers:** it runs on every buffer. `main.cpp` also triggers it (`triggerNext()`) when a detector band rises over its threshold, because the second-difference trigger missed 6 of 15 soft clicks: the mic's noise near Nyquist dominates it. That onset also restarts a capture that a knock started two or more chunks earlier, and cuts through the holdoff.
+  - **Peak range:** peaks are searched in 20-62 kHz only. The mic's shaped noise rises from -100 dBFS at 35 kHz to -70 at 90 kHz.
+- **`lib/bar_decision`:**
+  - Pairs each Detect with its capture (the capture started 0-36 ms before the event).
+  - Only settles BOTH. The fundamental counts if it rose ≥ 10 dB and stands ≥ 6 dB over the floor; the overtone counts too only if, in addition, it is at the bar's ratio ±0.3 %.
+  - The evidence is the late (40-61 ms) power sum of the counted lines, and a ≥ 10 dB lead wins.
+  - The struck bar's lines ring on, while the sympathetic bar's collapse (median drop 3 dB against 19 dB in 40 ms).
+  - On the 88 labelled strikes: all right, and the lines alone are never wrong (`test/test_decision`, vectors exported by `tools/analyze_sessions.py --export-vectors`).
+  - A or B is never changed. The End redraw keeps the decided band.
+- **Measuring:**
+  - `tools/session.py` (PlatformIO's Python, pyserial) logs a session, with `--at T:cmd` for timed commands such as `spec now`.
+  - `uv run python esp32/bar_detector_v3/tools/analyze_sessions.py --strikes --peaks` summarises the logs.
+  - The labels (which bar was struck) are `TRUTH` and `S5_SEQUENCE` in that tool.
+  - Ask the user to hold the other bar to get a bar's own lines, and give them a written strike sequence for mixed sessions.
+  - About 1.6 KB of output per strike was fine over USB/IP.
+- **Open points:**
+  - weak extra 38 detections 0.4 s before a strike (twice);
+  - the band-A upper guard (39.5-39.875 kHz) against a ~40 kHz background, not verified;
+  - the bat-detector WAVs (`data/raw/2026-10-30_*.wav`), not analysed yet.
 
 ## Display configuration (non-obvious)
 
