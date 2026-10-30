@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This folder is part of the barlab repo (`~/signal_analysis`; merged from `~/esp32` on 2026-10-09). The root `CLAUDE.md` covers the Python analysis side.
 
-Workspace for ESP32 projects targeting a **LilyGO T-Display v1.1** (ESP32-D0WDQ6-V3, 4MB flash, no PSRAM, ST7789 135x240 TFT), built and flashed from WSL2 with PlatformIO. Each subfolder is a standalone PlatformIO project (`tdisplay_test`, `ultrasonic_probe`, `bar_detector` (prototype 1, GPIO32 receiver), `bar_detector_v2` (prototype 2, PDM MEMS mic, on a second board), `bar_detector_v3` (prototype 3, the current one: prototype 2's board and mic, with re-measured bands and overtone-checked decisions), and `bar_detector_backup_40k_47k`, a frozen copy of bar_detector for the 40.7 / 42.78 kHz bars). Versions are kept as separate folders: never overwrite an earlier prototype's folder. `tdisplay_test/` is the working reference: copy its `platformio.ini` when starting a new project. See `README.md` for the user-facing guide.
+Workspace for ESP32 projects targeting a **LilyGO T-Display v1.1** (ESP32-D0WDQ6-V3, 4MB flash, no PSRAM, ST7789 135x240 TFT), built and flashed from WSL2 with PlatformIO. Each subfolder is a standalone PlatformIO project (`tdisplay_test`, `ultrasonic_probe`, `bar_detector` (prototype 1, GPIO32 receiver), `bar_detector_v2` (prototype 2, PDM MEMS mic, on a second board), `bar_detector_v3` (prototype 3: prototype 2's board and mic, with re-measured bands and overtone-checked decisions), `bar_detector_v4` (prototype 4, the current one: v3's detection driving a TV UI), and `bar_detector_backup_40k_47k`, a frozen copy of bar_detector for the 40.7 / 42.78 kHz bars). Versions are kept as separate folders: never overwrite an earlier prototype's folder. `tdisplay_test/` is the working reference: copy its `platformio.ini` when starting a new project. See `README.md` for the user-facing guide.
 
 ## Toolchain versions (matter for API choice)
 
@@ -25,7 +25,7 @@ pio run -t clean
 pio pkg exec -p tool-esptoolpy -- esptool.py --port /dev/ttyACM0 flash_id   # check serial link, chip, flash size
 ```
 
-No linters are configured. Only `bar_detector`, `bar_detector_v2` and `bar_detector_v3` have tests: `pio test -e native` (host, no board).
+No linters are configured. Only `bar_detector`, `bar_detector_v2`, `bar_detector_v3` and `bar_detector_v4` have tests: `pio test -e native` (host, no board).
 
 `pio device monitor` needs a TTY, so Claude cannot use it. Read serial without it like this (it resets the board to capture the boot output):
 
@@ -102,7 +102,7 @@ The device is already bound (persisted), so `bind` (admin) is not needed again. 
 - **Memory:** `spec` needs ~90 KB of heap. Allocating it in a global constructor threw `std::bad_alloc` and boot-looped the board, so it is allocated in `setup()`. Keep `double` out of per-sample loops: the ESP32 has no double FPU, and one such accumulator cost 16 % of a core.
 - **Testing the decimator:** `test_pdm` uses a 2nd-order sigma-delta model. That model itself puts a spur on 42 kHz from a strong (-10 dBFS) 150 kHz tone, so the alias test runs at -30 dBFS (the FIR alone gives -102 dB at 150 kHz).
 
-## bar_detector_v3 (prototype 3: overtone-checked decisions, current)
+## bar_detector_v3 (prototype 3: overtone-checked decisions)
 
 - **Hardware:** the same board and mic as prototype 2 (MAC `30:c6:f7:25:ad:f0`, BUSID `3-2`). `lib/tone_detector`, `lib/pdm_decimator` and `test/test_detector` are unchanged copies, and `tone_detector` must stay byte-identical to v1's.
 - **Measured on 2026-10-30, after the user changed the prototype** (`measurements/REPORT.md`, logs in `measurements/2026-10-30/`):
@@ -135,6 +135,28 @@ The device is already bound (persisted), so `bind` (admin) is not needed again. 
   - weak extra 38 detections 0.4 s before a strike (twice);
   - the band-A upper guard (39.5-39.875 kHz) against a ~40 kHz background, not verified;
   - the bat-detector WAVs (`data/raw/2026-10-30_*.wav`), not analysed yet.
+
+## bar_detector_v4 (prototype 4: the Space Command TV, current)
+
+- **What it is:** v3's detection, with `tone_detector`, `pdm_decimator`, `bar_decision` and `device_config` unchanged, driving a TV on the screen:
+  - 38 kHz: power, with CRT-style animations and a red standby LED (backlight PWM on LEDC channel 0);
+  - 47 kHz: next of 5 channels (TEST CARD, SPACE, PLASMA, FIREPLACE, ULTRASONIC);
+  - both bars: an explosion.
+- **`lib/tv_remote`** (host-tested in `test/test_tv`, with replays of v3's sessions S3-S7) turns decided strikes into commands:
+  - **Hold 300 ms:** "both" means both bands ring clean ≥ 44 dB within the hold. That is 48-60 dB for real both-strikes, against ≤ 41 dB for sympathetic ringing.
+  - **Weak strikes** (< 40 dB) wait 500 ms, and a stronger one replaces them.
+  - **Refractory:** a weak strike within 800 ms after a command is dropped.
+  - **Strike peaks:** the sampling task tracks each band's clean peak SNR during the detector's event (`Shared.strikePeak`).
+- **`src/TvScreen`:**
+  - **Frame:** one 240×135 16-bit sprite (64.8 KB), pushed whole at ≤ 33 fps. Its buffer is byte-swapped, so the effects that write it directly use swapped colours.
+  - **Allocation order in `setup()`:** mic (I2S DMA) first, then the sprite, then the strike spectrum. With the sprite first, I2S failed to get its DMA buffers. With the old spectrum (105 KB), `std::bad_alloc` boot-looped the board.
+  - **Slimmer spectrum:** v4's `strike_spectrum` therefore keeps only its two FFT windows and stores its spectra as int16 centi-dB (~83 KB, same numbers, v3's tests pass).
+  - **Boot heap:** the `HEAP` lines print it. About 29 KB of 8-bit heap is left.
+- **Checking the screen:**
+  - `shot` dumps the frame as hex rows, paced at 25 ms/row.
+  - `tools/console.py` keeps one serial connection open, with a FIFO for commands, because opening the port resets the board.
+  - `tools/render_shot.py` (barlab's venv has Pillow; PlatformIO's Python does not) renders the dump to a PNG, which can then be viewed.
+  - The user may be striking the bars while you test, and their real commands then interleave with yours (check the `TV cmd=` lines).
 
 ## Display configuration (non-obvious)
 
